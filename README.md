@@ -1,4 +1,4 @@
-<p align="center"><img src="concept/assets/harvestia-logo-480.png" alt="Harvestia" width="360"></p>
+<p align="center"><img src="public/assets/harvestia-logo-480.png" alt="Harvestia" width="360"></p>
 
 # Harvestia
 
@@ -6,33 +6,60 @@
 
 Harvestia is a browser-based pixel-art farming game with an agricultural economy referenced to real commodity markets and a $HRV token economy (Robinhood Chain first, BNB Chain later).
 
-## Current stage: 1 — Visual concept
+## Current stage: 2 — Playable pixel-art world
 
-`concept/` is a live, pannable pixel-art world rendered by the game's own sprite code (no mock-ups): six zones (livestock ranch, main farm, mill & industry, marketplace, co-op village, riverside), animated livestock, farmers and machinery, the game HUD, and an art-direction sheet (palette, terrain, crops, animals, buildings, machinery, UI kit, and what becomes playable in which stage).
+A Next.js + Phaser 3 + TypeScript game:
 
-Commodity prices shown are **simulated demo values**, clearly labelled. Wallet and vault balances are placeholders until Stage 8.
+- **World:** six zones on a 1024×640 art-pixel map with a 32×32 logical terrain grid (press **G** to show it).
+- **Rendering:** the approved Stage 1 sprite library is recorded into packed texture atlases. Every object is a depth-sorted Phaser image, so characters walk behind trees and buildings correctly.
+- **Animation:** animals, farmers, the tractor and the windmill blades play generated sprite-sheet animations.
+- **Camera:** drag, WASD/arrow keys, mouse-wheel zoom toward the cursor, +/−, a live minimap, and zone navigation from the left menu.
+- **Selection:**
+  - buildings, fields and individual planting cells
+  - animals and villagers
+  - machinery
+  - any terrain tile
 
-| File | Purpose |
+  Hovering outlines an object; clicking selects it and opens the inspector.
+- **React HUD** (Zustand state): profile, wallet and vault placeholders, a commodity board (clearly **simulated** demo values), a toolbar (keys 1–6), the inspector and view controls.
+
+The Stage 1 concept and art-direction sheet stay available at `/concept/index.html`.
+
+| Path | Purpose |
 |---|---|
-| `concept/art.js` | Procedural pixel-art sprite library |
-| `concept/world.js` | Terrain generation, world layout, ambient animation |
-| `concept/ui.js` | HUD, icons, camera, minimap, object inspector |
-| `concept/sheet.js` | Art-direction sheet |
-| `concept/serve.mjs` | Zero-dependency static server (local + Railway) |
+| `src/game/art/sprites.js` | Procedural pixel-art sprite library (approved in Stage 1) |
+| `src/game/world/` | Geometry, terrain generation, world layout and hotspots |
+| `src/game/render/atlas.ts` | Draw-call recorder, atlas packer, Graphics adapter |
+| `src/game/scenes/WorldScene.ts` | Phaser scene: rendering, actors, camera, selection |
+| `src/store/game.ts` | Shared state between Phaser and the HUD |
+| `src/components/hud/` | React HUD |
 
-## Run locally
+## Develop
 
 ```bash
-npm start
+npm install
+npm run dev
 ```
 
-Then open http://127.0.0.1:5180.
+Then open http://localhost:5180.
 
 ## Deploy
 
-- **Vercel** serves `concept/` as static files (`vercel.json`).
-- **Railway** runs `node concept/serve.mjs` (`railway.json`), listening on `$PORT`.
+- **Vercel:** Next.js (`vercel.json`).
+- **Railway:** `npm run build`, then `npm run start` on `$PORT` (`railway.json`).
 
 ## Roadmap
 
-Development is stage-gated; each stage ships only after explicit approval. Stages: 1 visual concept · 2 playable world · 3 animation polish · 4 game UI · 5 core gameplay · 6 backend · 7 commodity economy · 8 blockchain · 9 buybacks & rewards · 10 multiplayer & competitions · 11 production readiness.
+Development is stage-gated; each stage ships only after explicit approval.
+
+1. Visual concept ✓
+2. Playable world ← current
+3. Animation polish
+4. Game UI
+5. Core gameplay
+6. Backend
+7. Commodity economy
+8. Blockchain
+9. Buybacks and rewards
+10. Multiplayer and competitions
+11. Production readiness
