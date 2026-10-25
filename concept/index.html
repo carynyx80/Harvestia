@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harvestia — Stage 1 Visual Concept</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<meta name="description" content="Harvestia — grow your farm, trade the markets, build your empire. A pixel-art Web3 farming economy.">
+<meta name="theme-color" content="#0b0e13">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<meta property="og:title" content="Harvestia">
+<meta property="og:description" content="Grow your farm. Trade the markets. Build your empire.">
+<meta property="og:image" content="assets/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+</head>
+<body>
+<main id="game">
+  <canvas id="world"></canvas>
+  <div id="vignette"></div>
+  <div id="labels"></div>
+  <div id="hoverTip" hidden></div>
+
+  <header id="top">
+    <div id="brand"><img id="logo" src="assets/harvestia-logo-480.png" alt="Harvestia"></div>
+    <div id="player" class="panel">
+      <div class="avatar"><canvas id="avatar" width="13" height="16"></canvas></div>
+      <div class="pmeta">
+        <div class="pname">Sunny Acres <span class="lvl">Lv 7</span></div>
+        <div class="xp"><i style="width:62%"></i><b>1,240 / 2,000 XP</b></div>
+      </div>
+    </div>
+    <div id="res">
+      <div class="pill" title="Tokens in your connected wallet (read from the $HRV ERC-20 contract — Stage 8)"><span class="ic" data-i="coin"></span><div><small>Wallet</small><b>— HRV</b></div></div>
+      <div class="pill" title="Tokens deposited in the Game Vault (Stage 8)"><span class="ic" data-i="vault"></span><div><small>Game Vault</small><b>— HRV</b></div></div>
+      <div class="pill sim" title="Simulated currency used until on-chain integration"><span class="ic" data-i="seed"></span><div><small>Farm Coins · sim</small><b>1,250</b></div></div>
+      <div class="pill weather"><span class="ic" data-i="sun"></span><div><small>Spring · Day 12</small><b>Sunny 24°</b></div></div>
+      <button class="btn gold" disabled title="Wallet connection arrives in Stage 8">Connect Wallet</button>
+      <button class="sq" title="Settings"><span class="ic" data-i="gear"></span></button>
+    </div>
+  </header>
+
+  <nav id="left" class="panel">
+    <button class="nav on" data-tip="My Farm"><span class="ic" data-i="home"></span></button>
+    <button class="nav" data-tip="Inventory"><span class="ic" data-i="bag"></span></button>
+    <button class="nav" data-tip="Livestock"><span class="ic" data-i="cow"></span></button>
+    <button class="nav" data-tip="Machinery"><span class="ic" data-i="tractor"></span></button>
+    <button class="nav" data-tip="Marketplace"><span class="ic" data-i="stall"></span></button>
+    <button class="nav" data-tip="Commodity Exchange"><span class="ic" data-i="chart"></span></button>
+    <button class="nav" data-tip="Cooperative"><span class="ic" data-i="coop"></span></button>
+    <button class="nav" data-tip="Competitions"><span class="ic" data-i="trophy"></span></button>
+  </nav>
+
+  <aside id="board" class="panel">
+    <div class="ph"><span class="ic" data-i="chart"></span>Commodity Board <em class="tag">SIMULATED</em></div>
+    <div id="rows"></div>
+    <p class="fine">Demo values — not live market data. Real reference feeds arrive in Stage 7 with source &amp; timestamp.</p>
+    <div class="ph sub"><span class="ic" data-i="sun"></span>Forecast</div>
+    <div id="forecast"></div>
+  </aside>
+
+  <div id="bar">
+    <div id="tools"></div>
+  </div>
+
+  <div id="mini" class="panel"><canvas id="minimap" width="192" height="120"></canvas></div>
+
+  <div id="stagecard" class="panel">
+    <div class="st">Stage 1 · Visual concept</div>
+    <div class="hint">Drag to pan · scroll / +/− to zoom · click anything</div>
+    <button class="btn" id="openSheet">Art direction sheet →</button>
+  </div>
+
+  <div id="card" class="panel" hidden></div>
+</main>
+
+<section id="sheet" hidden>
+  <div class="sheetTop"><button class="btn" id="closeSheet">← Back to world</button><img class="sheetLogo" src="assets/harvestia-logo-480.png" alt="Harvestia"><h1>Art Direction</h1><span>Stage 1 — for approval</span></div>
+  <div id="sheetBody"></div>
+</section>
+
+<script src="art.js"></script>
+<script src="world.js"></script>
+<script src="ui.js"></script>
+<script src="sheet.js"></script>
+</body>
+</html>

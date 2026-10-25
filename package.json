@@ -1,0 +1,12 @@
+{
+  "name": "harvestia",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Harvestia — a pixel-art Web3 farming economy. Stage 1 visual concept.",
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "dev": "node concept/serve.mjs",
+    "start": "node concept/serve.mjs"
+  }
+}
