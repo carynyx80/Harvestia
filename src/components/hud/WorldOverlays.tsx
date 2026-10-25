@@ -1,5 +1,6 @@
 'use client';
 import { useGame } from '@/store/game';
+import { ApiStatus } from './ApiStatus';
 import { Icon } from './Icon';
 
 const LABELS: [string, number, number][] = [
@@ -44,7 +45,8 @@ export function ViewControls() {
         <b className="text-base">Stage 2 · Playable world</b>
         <a href="/concept/index.html" className="text-xs text-muted underline">Stage 1 art</a>
       </div>
-      <div className="mt-1 mb-2 text-xs text-muted">Drag or WASD to move · scroll to zoom · click anything</div>
+      <div className="mt-1 text-xs text-muted">Drag or WASD to move · scroll to zoom · click anything</div>
+      <div className="mt-1 mb-2"><ApiStatus /></div>
       <div className="flex items-center gap-1.5">
         <button className="btn-wood !px-2.5 !py-0.5" onClick={() => requestZoom(-1)} aria-label="Zoom out">−</button>
         <span className="w-12 text-center text-sm font-semibold">{zoom.toFixed(zoom % 1 ? 1 : 0)}×</span>

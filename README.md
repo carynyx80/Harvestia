@@ -34,19 +34,30 @@ The Stage 1 concept and art-direction sheet stay available at `/concept/index.ht
 | `src/store/game.ts` | Shared state between Phaser and the HUD |
 | `src/components/hud/` | React HUD |
 
+## Architecture
+
+| Part | Where | Path |
+|---|---|---|
+| Frontend: Next.js + Phaser game client | Vercel, https://harvestia-one.vercel.app | repo root |
+| Backend API: Fastify + TypeScript | Railway, https://harvestia-api.up.railway.app | `server/` |
+
+The API currently exposes `GET /health` and `GET /v1/status`. Player accounts, persistent farm state, PostgreSQL, Redis and job queues arrive in Stage 6. CORS only allows the Vercel site, its preview deployments and local dev.
+
 ## Develop
 
 ```bash
-npm install
-npm run dev
+npm install && npm --prefix server install
+npm run dev        # frontend on http://localhost:5180
+npm run api:dev    # API on http://127.0.0.1:4000
+npm run api:test   # API tests
 ```
 
-Then open http://localhost:5180.
+Copy `.env.example` to `.env.local` and point `NEXT_PUBLIC_API_URL` at `http://127.0.0.1:4000` to use a local API.
 
 ## Deploy
 
-- **Vercel:** Next.js (`vercel.json`).
-- **Railway:** `npm run build`, then `npm run start` on `$PORT` (`railway.json`).
+- **Vercel** builds the Next.js app from the repo root; `server/` is excluded via `.vercelignore`.
+- **Railway** builds the service from the `server/` root directory (`npm run build`, then `npm run start`), health-checked on `/health`. It redeploys only when files under `server/` change.
 
 ## Roadmap
 

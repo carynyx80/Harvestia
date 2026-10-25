@@ -2,7 +2,7 @@
   "name": "harvestia",
   "version": "0.2.0",
   "private": true,
-  "description": "Harvestia — a pixel-art Web3 farming economy.",
+  "description": "Harvestia \u2014 a pixel-art Web3 farming economy.",
   "engines": {
     "node": ">=20"
   },
@@ -10,7 +10,9 @@
     "dev": "next dev -p 5180",
     "build": "next build",
     "start": "next start -H 0.0.0.0 -p ${PORT:-3000}",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "api:dev": "npm --prefix server run dev",
+    "api:test": "npm --prefix server test"
   },
   "dependencies": {
     "next": "15.5.28",
