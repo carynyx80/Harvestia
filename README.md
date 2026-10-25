@@ -6,7 +6,24 @@
 
 Harvestia is a browser-based pixel-art farming game with an agricultural economy referenced to real commodity markets and a $HRV token economy (Robinhood Chain first, BNB Chain later).
 
-## Current stage: 3 — Animations and visual polish
+## Current stage: 4 — Game UI
+
+Pixel-art game windows over the live world. Open them from the left menu, the toolbar, keyboard shortcuts or the inspector's action button:
+
+| Window | Shortcut | Contents |
+|---|---|---|
+| Inventory | I | Storage grid with category tabs, capacity, item details, quality stars and value |
+| Marketplace | B | General Store (seeds, feed, livestock, buildings, land, machinery) priced in $HRV with USD reference ≤ $15; purchase review with quote expiry and the 50% burn / 50% farmer-treasury split; player listings preview |
+| Commodity Exchange | E | Market list, price chart (7/30/60 days), in-game price breakdown with bounded moves, order ticket with fee, order book, recent trades |
+| Profile | P | Farm, level and XP, stats, achievements |
+| My Farm | F | Field stages from the live world, today's weather and tasks |
+| Equipment | M | Machines with level, condition, effects and upgrade cost |
+| Livestock | L | Herd with health, happiness, feeding and production timers |
+| Wallet & Vault | V | Wallet vs Game Vault balances (placeholders), 3% deposit / 5% withdrawal fees, burn and treasury totals |
+
+Farm controls: the toolbar strip shows a seed picker (Plant), watering-can level (Water), ready fields (Harvest), and building/upgrade shortcuts. All prices, balances and market figures are clearly labelled demo or simulated values; actions show the stage that enables them.
+
+### Stage 3 — Animations and visual polish
 
 The world is alive:
 
@@ -46,6 +63,8 @@ The Stage 1 concept and art-direction sheet stay available at `/concept/index.ht
 | `src/game/systems/` | Lighting, weather, water, wildlife, crop and particle systems |
 | `src/store/game.ts` | Shared state between Phaser and the HUD |
 | `src/components/hud/` | React HUD |
+| `src/components/panels/`, `src/components/ui/` | Game windows and the pixel UI kit |
+| `src/game/data/` | Item catalog, economy rules, simulated market, demo player data |
 
 ## Architecture
 
@@ -78,8 +97,8 @@ Development is stage-gated; each stage ships only after explicit approval.
 
 1. Visual concept ✓
 2. Playable world ✓
-3. Animation polish ← current
-4. Game UI
+3. Animation polish ✓
+4. Game UI ← current
 5. Core gameplay
 6. Backend
 7. Commodity economy

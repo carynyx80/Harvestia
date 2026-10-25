@@ -2,6 +2,8 @@
 import { CommodityBoard } from './CommodityBoard';
 import { Inspector } from './Inspector';
 import { LeftNav } from './LeftNav';
+import { ToolContext } from './ToolContext';
+import { PanelHost } from '@/components/panels/PanelHost';
 import { Toolbar } from './Toolbar';
 import { TopBar } from './TopBar';
 import { HoverTip, LoadingScreen, MinimapFrame, ViewControls, ZoneLabels } from './WorldOverlays';
@@ -18,7 +20,9 @@ export function Hud() {
       <Inspector />
       <MinimapFrame />
       <ViewControls />
+      <ToolContext />
       <Toolbar />
+      <PanelHost />
       <HoverTip />
       <LoadingScreen />
     </div>

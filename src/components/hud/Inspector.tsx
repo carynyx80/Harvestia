@@ -1,6 +1,6 @@
 'use client';
 import { CROP_NAMES, STAGE_NAMES, TILE } from '@/game/world/geometry';
-import { useGame, type Selection } from '@/store/game';
+import { useGame, type PanelId, type Selection } from '@/store/game';
 
 const PRODUCT = { cow: 'Milk', sheep: 'Wool', pig: 'Truffles', chicken: 'Eggs', duck: 'Feathers' } as const;
 const BUILDABLE = new Set(['Meadow']);
@@ -29,8 +29,31 @@ function body(sel: Selection, tool: string): { zone: string; title: string; rows
   }
 }
 
+// Which window a selected world object opens.
+const ACTIONS: Record<string, [string, PanelId, string?]> = {
+  house: ['Farmer profile', 'profile'], seedcrates: ['Seeds', 'inventory', 'seeds'], well: ['Equipment', 'equipment'],
+  trading: ['Open shop', 'shop', 'seeds'], market: ['Player listings', 'shop', 'listings'], exchange: ['Open exchange', 'exchange'],
+  vault: ['Wallet & vault', 'wallet'], board: ['Farm tasks', 'farm'], storage: ['Inventory', 'inventory'],
+  shed: ['Equipment', 'equipment'], harvester: ['Equipment', 'equipment'], pump: ['Equipment', 'equipment'],
+  barn: ['Livestock', 'livestock', 'cow'], pasture: ['Livestock', 'livestock', 'cow'], sheeppen: ['Livestock', 'livestock', 'sheep'],
+  coop: ['Livestock', 'livestock', 'chicken'], pigshed: ['Livestock', 'livestock', 'pig'], feed: ['Feed', 'inventory', 'supplies'],
+  silo1: ['Inventory', 'inventory', 'crops'], silo2: ['Inventory', 'inventory', 'crops'], warehouse: ['Inventory', 'inventory'],
+  greenhouse: ['Buildings', 'shop', 'buildings'], mill: ['Inventory', 'inventory', 'goods'], dairy: ['Inventory', 'inventory', 'goods'], factory: ['Inventory', 'inventory', 'goods'],
+  hq: ['Cooperatives', 'coop'], cmk1: ['Cooperatives', 'coop'], cmk2: ['Cooperatives', 'coop'], sharedmill: ['Cooperatives', 'coop'],
+  tower: ['Leaderboard', 'competitions'], arena: ['Competitions', 'competitions'],
+};
+function actionFor(sel: Selection): [string, PanelId, string?] | null {
+  if (sel.type === 'animal') return sel.kind === 'duck' ? null : ['Livestock', 'livestock', sel.kind];
+  if (sel.type === 'cell') return ['Seeds', 'inventory', 'seeds'];
+  if (sel.type === 'hotspot') {
+    if (sel.hot.kind === 'plot') return sel.hot.crop ? ['Sell at exchange', 'exchange', sel.hot.crop] : ['Buy land', 'shop', 'land'];
+    return ACTIONS[sel.hot.id] ?? null;
+  }
+  return null;
+}
+
 export function Inspector() {
-  const sel = useGame(s => s.selected), tool = useGame(s => s.tool), select = useGame(s => s.select);
+  const sel = useGame(s => s.selected), tool = useGame(s => s.tool), select = useGame(s => s.select), open = useGame(s => s.openPanel);
   if (!sel) return null;
   const b = body(sel, tool);
   return (
@@ -47,7 +70,10 @@ export function Inspector() {
         <div className="mb-2 h-3 border-2 border-wood-d bg-[#6b4a2e]"><i className="xp-fill block h-full" style={{ width: `${(sel.cropStage / 3) * 100}%` }} /></div>
       )}
       <p className="my-2 leading-snug">{b.text}</p>
-      <span className="inline-block border-2 border-[#2a5f61] bg-teal px-1.5 py-0.5 text-xs text-white">Playable from Stage {b.stage}</span>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-block border-2 border-[#2a5f61] bg-teal px-1.5 py-0.5 text-xs text-white">Playable from Stage {b.stage}</span>
+        {(() => { const a = actionFor(sel); return a && <button className="btn-gold ml-auto !px-2 !py-0.5 text-sm" onClick={() => open(a[1], a[2])}>{a[0]}</button>; })()}
+      </div>
     </section>
   );
 }

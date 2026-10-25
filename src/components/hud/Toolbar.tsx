@@ -10,20 +10,27 @@ const TOOLS: { key: Tool; label: string; icon: IconName }[] = [
 ];
 
 export function Toolbar() {
-  const tool = useGame(s => s.tool), setTool = useGame(s => s.setTool);
+  const tool = useGame(s => s.tool), setTool = useGame(s => s.setTool), togglePanel = useGame(s => s.togglePanel);
+  // Inventory is a window, not a field tool
+  const choose = (k: Tool) => { if (k === 'inventory') togglePanel('inventory'); else setTool(k); };
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { const n = Number(e.key); if (n >= 1 && n <= TOOLS.length) setTool(TOOLS[n - 1].key); };
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+      const n = Number(e.key);
+      if (n >= 1 && n <= TOOLS.length) choose(TOOLS[n - 1].key);
+    };
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);
-  }, [setTool]);
+  });
   return (
     <div className="panel-dark pointer-events-auto absolute bottom-2.5 left-1/2 flex -translate-x-1/2 gap-1.5 p-2" role="toolbar" aria-label="Farm tools">
       {TOOLS.map((t, k) => (
         <button
           key={t.key}
-          onClick={() => setTool(t.key)}
-          className={`relative flex h-[66px] w-12 flex-col items-center gap-0.5 border-[3px] border-wood-d pt-1 text-ink transition-transform sm:w-[62px] ${tool === t.key ? '-translate-y-[3px] bg-[#fff0b8] shadow-[inset_0_-4px_0_#e3b341,0_0_0_3px_#f2c94c]' : 'bg-parch shadow-[inset_0_-4px_0_#d8bd82] hover:bg-parch-l'}`}
-          aria-pressed={tool === t.key}
+          onClick={() => choose(t.key)}
+          className={`relative flex h-[66px] w-12 flex-col items-center gap-0.5 border-[3px] border-wood-d pt-1 text-ink transition-transform sm:w-[62px] ${tool === t.key && t.key !== 'inventory' ? '-translate-y-[3px] bg-[#fff0b8] shadow-[inset_0_-4px_0_#e3b341,0_0_0_3px_#f2c94c]' : 'bg-parch shadow-[inset_0_-4px_0_#d8bd82] hover:bg-parch-l'}`}
+          aria-pressed={tool === t.key && t.key !== 'inventory'}
         >
           <kbd className="absolute top-px left-[3px] text-[10px] font-semibold text-muted">{k + 1}</kbd>
           <Icon name={t.icon} size={32} />

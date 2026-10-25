@@ -17,6 +17,9 @@ export type Selection =
 /** HUD → world environment request (any subset); `n` makes repeats distinct. */
 export interface EnvCommand { n: number; hour?: number; season?: Season; weather?: Weather; speed?: number }
 
+export type PanelId = 'inventory' | 'shop' | 'profile' | 'farm' | 'equipment' | 'livestock' | 'exchange' | 'wallet' | 'coop' | 'competitions';
+export interface OpenPanel { id: PanelId; tab?: string }
+
 export interface Hover { label: string; sub: string; sx: number; sy: number }
 export interface CameraView { x: number; y: number; zoom: number; w: number; h: number }
 
@@ -32,7 +35,14 @@ interface GameState {
   zoomStep: { dir: 1 | -1; n: number } | null;
   env: EnvSnapshot;
   envCommand: EnvCommand | null;
+  panel: OpenPanel | null;
+  /** seed chosen in the Plant tool's picker (an item id) */
+  seed: string;
   setReady(): void;
+  openPanel(id: PanelId, tab?: string): void;
+  togglePanel(id: PanelId, tab?: string): void;
+  closePanel(): void;
+  setSeed(id: string): void;
   setEnv(e: EnvSnapshot): void;
   commandEnv(c: Omit<EnvCommand, 'n'>): void;
   setTool(t: Tool): void;
@@ -55,7 +65,13 @@ export const useGame = create<GameState>((set, get) => ({
   zoomStep: null,
   env: { hour: 7.5, day: 12, season: 'spring', weather: 'sunny', speed: 1, temp: 16, night: 0 },
   envCommand: null,
+  panel: null,
+  seed: 'seed-wheat',
   setReady: () => set({ ready: true }),
+  openPanel: (id, tab) => set({ panel: { id, tab } }),
+  togglePanel: (id, tab) => set({ panel: get().panel?.id === id && (!tab || get().panel?.tab === tab) ? null : { id, tab } }),
+  closePanel: () => set({ panel: null }),
+  setSeed: seed => set({ seed }),
   setEnv: env => {
     const p = get().env;
     if (p.hour !== env.hour || p.day !== env.day || p.season !== env.season || p.weather !== env.weather || p.speed !== env.speed || p.temp !== env.temp) set({ env });
