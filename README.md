@@ -6,9 +6,20 @@
 
 Harvestia is a browser-based pixel-art farming game with an agricultural economy referenced to real commodity markets and a $HRV token economy (Robinhood Chain first, BNB Chain later).
 
-## Current stage: 2 — Playable pixel-art world
+## Current stage: 3 — Animations and visual polish
 
-A Next.js + Phaser 3 + TypeScript game:
+The world is alive:
+
+- **Day and night:** a sky-tinted lighting pass from dawn to dusk to night. Windows switch on one by one and street lamps glow.
+- **Weather:** sunny, cloudy, rain, storm (with lightning) and drought, with smooth transitions. Rain splashes on the ground and ripples on water; drought parches the land and stirs up dust.
+- **Seasons:** spring, summer, autumn (orange, red and gold trees, falling leaves) and winter (snow cover, snowy trees, snowfall, iced shorelines). Grass and trees are repainted from season palettes.
+- **Wind:** tree canopies sway, and gusts roll across the crop fields; both strengthen in storms.
+- **Crops:** growth-stage sprites, a demo plot that loops plant → sprout → grow → harvest with pop and sparkle effects, and glints on ripe crops.
+- **Water:** flowing sparkles, lapping shoreline foam, ripples, jumping fish and duck wakes.
+- **Wildlife:** grazing cows and sheep, butterflies by day, fireflies at night, and bird flocks.
+- **Environment panel:** set the time, clock speed, weather and season to review every look. The top bar shows the live season, day, weather, temperature and time.
+
+Stage 2 foundations: a Next.js + Phaser 3 + TypeScript game:
 
 - **World:** six zones on a 1024×640 art-pixel map with a 32×32 logical terrain grid (press **G** to show it).
 - **Rendering:** the approved Stage 1 sprite library is recorded into packed texture atlases. Every object is a depth-sorted Phaser image, so characters walk behind trees and buildings correctly.
@@ -31,6 +42,8 @@ The Stage 1 concept and art-direction sheet stay available at `/concept/index.ht
 | `src/game/world/` | Geometry, terrain generation, world layout and hotspots |
 | `src/game/render/atlas.ts` | Draw-call recorder, atlas packer, Graphics adapter |
 | `src/game/scenes/WorldScene.ts` | Phaser scene: rendering, actors, camera, selection |
+| `src/game/env/` | Clock, sky colours, weather looks, season palettes |
+| `src/game/systems/` | Lighting, weather, water, wildlife, crop and particle systems |
 | `src/store/game.ts` | Shared state between Phaser and the HUD |
 | `src/components/hud/` | React HUD |
 
@@ -64,8 +77,8 @@ Copy `.env.example` to `.env.local` and point `NEXT_PUBLIC_API_URL` at `http://1
 Development is stage-gated; each stage ships only after explicit approval.
 
 1. Visual concept ✓
-2. Playable world ← current
-3. Animation polish
+2. Playable world ✓
+3. Animation polish ← current
 4. Game UI
 5. Core gameplay
 6. Backend

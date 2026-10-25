@@ -2,7 +2,7 @@
 import { useEffect, useRef } from 'react';
 import HV from '@/game/art/sprites';
 
-export type IconName = 'home' | 'bag' | 'cow' | 'tractor' | 'stall' | 'chart' | 'coop' | 'trophy' | 'seed' | 'water' | 'harvest' | 'build' | 'upgrade' | 'coin' | 'vault' | 'sun' | 'cloud' | 'rain' | 'gear';
+export type IconName = 'home' | 'bag' | 'cow' | 'tractor' | 'stall' | 'chart' | 'coop' | 'trophy' | 'seed' | 'water' | 'harvest' | 'build' | 'upgrade' | 'coin' | 'vault' | 'sun' | 'cloud' | 'rain' | 'gear' | 'storm' | 'drought' | 'snow' | 'moon';
 
 /** 12×12 pixel icon scaled with nearest-neighbour. */
 export function Icon({ name, size = 24, className = '' }: { name: IconName; size?: number; className?: string }) {

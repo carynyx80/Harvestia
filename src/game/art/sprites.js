@@ -3,6 +3,7 @@
 // scaled with nearest-neighbour. Coordinates: (x, y) = top-left unless noted.
 
 'use strict';
+/** @type {Record<string, any> & { onWindow?: (x: number, y: number, w: number, h: number) => void, onLamp?: (x: number, y: number) => void }} */
 const HV = {};
 let G = null;
 HV.use = g => { G = g; G.imageSmoothingEnabled = false; };
@@ -37,6 +38,7 @@ const M = (ox, oy, W, flip) => (dx, dy, w, h, c) => R(flip ? ox + W - dx - w : o
 
 // ---------------------------------------------------------------- shared parts
 const win = HV.win = (x, y, w = 10, h = 9) => {
+  if (HV.onWindow) HV.onWindow(x, y, w, h);
   R(x, y, w, h, '#fff4dc'); R(x + 1, y + 1, w - 2, h - 2, '#4f97c2'); R(x + 1, y + 1, w - 2, 2, '#86c8e8');
   P(x + 2, y + 3, '#d6f2ff'); P(x + 3, y + 2, '#d6f2ff');
   R(x + Math.floor(w / 2), y + 1, 1, h - 2, '#fff4dc'); R(x + 1, y + Math.floor(h / 2), w - 2, 1, '#fff4dc');
@@ -134,7 +136,9 @@ HV.crate = (x, y, fill) => {
 HV.hay = (x, y) => { R(x + 2, y + 7, 11, 2, SH); R(x, y, 11, 7, '#e3bd55'); R(x, y, 11, 2, '#f2d77a'); R(x, y + 6, 11, 1, '#c49a35'); R(x + 3, y, 1, 7, '#c49a35'); R(x + 7, y, 1, 7, '#c49a35'); P(x + 5, y + 3, '#c49a35'); P(x + 1, y + 4, '#f2d77a'); };
 HV.barrel = (x, y) => { R(x + 1, y + 9, 8, 1, SH); R(x, y, 7, 9, '#9a6a3c'); R(x, y, 7, 1, '#6b4226'); R(x, y + 2, 7, 1, '#5e6670'); R(x, y + 6, 7, 1, '#5e6670'); R(x + 1, y + 1, 1, 7, '#b98250'); R(x + 5, y + 1, 1, 7, '#7a4e2c'); };
 HV.trough = (x, y) => { R(x + 1, y + 6, 18, 1, SH); R(x, y, 18, 6, '#8a5a32'); R(x + 1, y + 1, 16, 3, '#5ea9d1'); R(x + 2, y + 1, 5, 1, '#a8dcf2'); R(x, y + 5, 18, 1, '#5e3a20'); };
-HV.lamp = (x, y) => { R(x + 1, y, 3, 1, SH); R(x, y - 16, 1, 16, '#3a3a3a'); R(x - 1, y - 20, 3, 4, '#2a2a2a'); P(x, y - 19, '#ffe69a'); P(x, y - 18, '#f7c94a'); R(x - 1, y - 21, 3, 1, '#2a2a2a'); };
+HV.lamp = (x, y) => {
+  if (HV.onLamp) HV.onLamp(x, y - 19);
+ R(x + 1, y, 3, 1, SH); R(x, y - 16, 1, 16, '#3a3a3a'); R(x - 1, y - 20, 3, 4, '#2a2a2a'); P(x, y - 19, '#ffe69a'); P(x, y - 18, '#f7c94a'); R(x - 1, y - 21, 3, 1, '#2a2a2a'); };
 HV.sign = (x, y, col = '#c48d52') => { R(x + 1, y, 4, 1, SH); R(x, y - 10, 2, 10, '#6e4527'); R(x - 6, y - 14, 14, 7, col); R(x - 6, y - 14, 14, 1, '#e0b07a'); R(x - 6, y - 8, 14, 1, '#6e4527'); R(x - 4, y - 12, 8, 1, '#5a3420'); R(x - 4, y - 10, 6, 1, '#5a3420'); };
 HV.well = (x, y) => {
   E(x + 8, y + 20, 9, 2, SH);
@@ -515,22 +519,28 @@ HV.crop = (type, st, x, y) => {
 };
 
 // ---------------------------------------------------------------- animals
-HV.cow = (x, y, f = 0, flip = false, col = '#2a2624') => {
+/** graze lowers the head to the grass */
+HV.cow = (x, y, f = 0, flip = false, col = '#2a2624', graze = false) => {
+  const hy = graze ? 3 : 0;
   const r = M(x, y, 18, flip); E(x + 9, y + 12, 8, 2, SH);
   const a = f % 2;
   r(3, 8, 2, a ? 4 : 3, '#3a2a22'); r(6, 8, 2, a ? 3 : 4, '#3a2a22'); r(10, 8, 2, a ? 4 : 3, '#3a2a22'); r(13, 8, 2, a ? 3 : 4, '#3a2a22');
   r(2, 3, 13, 6, '#f7f4ee'); r(2, 8, 13, 1, '#d6d0c4'); r(2, 3, 13, 1, '#ffffff');
   r(4, 3, 3, 3, col); r(9, 5, 3, 3, col); r(12, 3, 2, 2, col); r(7, 9, 3, 1, '#f2a9a9');
-  r(14, 1, 4, 5, '#f7f4ee'); r(15, 4, 3, 2, '#f2a9a9'); r(16, 5, 1, 1, '#c87a7a'); r(16, 2, 1, 1, '#1a1a1a'); r(14, 0, 1, 1, '#e8dcc0'); r(17, 0, 1, 1, '#e8dcc0'); r(13, 1, 1, 2, col);
+  r(14, 1 + hy, 4, 5, '#f7f4ee'); r(15, 4 + hy, 3, 2, '#f2a9a9'); r(16, 5 + hy, 1, 1, '#c87a7a'); r(16, 2 + hy, 1, 1, '#1a1a1a'); r(14, hy, 1, 1, '#e8dcc0'); r(17, hy, 1, 1, '#e8dcc0'); r(13, 1 + hy, 1, 2, col);
+  if (graze) { r(16, 9, 1, 1, '#5fae3f'); r(18, 8, 1, 1, '#7fcf5c'); }
   r(1, 3, 1, 5, col); r(0, 7, 1, 2, col);
 };
-HV.sheep = (x, y, f = 0, flip = false) => {
+/** graze lowers the head to the grass */
+HV.sheep = (x, y, f = 0, flip = false, graze = false) => {
+  const hy = graze ? 3 : 0;
   const r = M(x, y, 13, flip); E(x + 6, y + 11, 6, 2, SH);
   const a = f % 2;
   r(2, 8, 1, a ? 3 : 2, '#3a3330'); r(4, 8, 1, a ? 2 : 3, '#3a3330'); r(7, 8, 1, a ? 3 : 2, '#3a3330'); r(9, 8, 1, a ? 2 : 3, '#3a3330');
   r(1, 1, 10, 7, '#f4efe2'); r(2, 0, 3, 1, '#f4efe2'); r(6, 0, 3, 1, '#f4efe2'); r(0, 2, 1, 5, '#f4efe2'); r(1, 7, 10, 1, '#d9d0bd'); r(2, 1, 2, 1, '#ffffff'); r(6, 1, 2, 1, '#ffffff');
   P(flip ? x + 13 - 4 - 1 : x + 4, y + 4, '#e2dac8'); P(flip ? x + 13 - 7 - 1 : x + 7, y + 3, '#e2dac8');
-  r(10, 2, 3, 4, '#3a3330'); r(11, 3, 1, 1, '#e8e0d0'); r(9, 2, 1, 1, '#2a2420');
+  r(10, 2 + hy, 3, 4, '#3a3330'); r(11, 3 + hy, 1, 1, '#e8e0d0'); r(9, 2 + hy, 1, 1, '#2a2420');
+  if (graze) { r(12, 9, 1, 1, '#5fae3f'); r(13, 8, 1, 1, '#7fcf5c'); }
 };
 HV.pig = (x, y, f = 0, flip = false) => {
   const r = M(x, y, 14, flip); E(x + 7, y + 10, 6, 2, SH);

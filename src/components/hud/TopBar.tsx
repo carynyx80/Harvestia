@@ -1,5 +1,7 @@
 'use client';
 import HV from '@/game/art/sprites';
+import { useGame } from '@/store/game';
+import { WEATHER_LABEL, formatHour, isSnowing } from '@/game/env/environment';
 import { Icon, Sprite, type IconName } from './Icon';
 
 const drawAvatar = () => HV.farmer(2, 1, 0, false, { shirt: '#c4553b', pants: '#3f6fa8' }, 'front');
@@ -15,6 +17,18 @@ function Pill({ icon, label, value, tone = 'gold', title }: { icon: IconName; la
       </div>
     </div>
   );
+}
+
+const SEASON_LABEL = { spring: 'Spring', summer: 'Summer', autumn: 'Autumn', winter: 'Winter' } as const;
+
+/** Live season, day, weather, temperature and clock from the world. */
+function WeatherPill() {
+  const env = useGame(s => s.env);
+  const icon: IconName = isSnowing(env.season, env.weather) ? 'snow'
+    : env.weather === 'sunny' ? (env.night > .5 ? 'moon' : 'sun')
+    : env.weather === 'cloudy' ? 'cloud' : env.weather === 'rainy' ? 'rain' : env.weather === 'stormy' ? 'storm' : 'drought';
+  const label = isSnowing(env.season, env.weather) ? 'Snow' : WEATHER_LABEL[env.weather];
+  return <Pill icon={icon} label={`${SEASON_LABEL[env.season]} · Day ${env.day}`} value={`${label} ${env.temp}° · ${formatHour(env.hour)}`} tone="white" title="Weather affects crop growth once core gameplay arrives" />;
 }
 
 export function TopBar() {
@@ -40,7 +54,7 @@ export function TopBar() {
         <Pill icon="coin" label="Wallet" value="— HRV" title="Read from the $HRV ERC-20 contract once wallets connect (Stage 8)" />
         <Pill icon="vault" label="Game Vault" value="— HRV" title="Deposited $HRV available for in-game spending (Stage 8)" />
         <div className="hidden md:block"><Pill icon="seed" label="Farm Coins · sim" value="1,250" tone="green" title="Simulated currency until on-chain integration" /></div>
-        <div className="hidden xl:block"><Pill icon="sun" label="Spring · Day 12" value="Sunny 24°" tone="white" title="Weather and seasons arrive in Stage 3" /></div>
+        <div className="hidden md:block"><WeatherPill /></div>
         <button className="btn-gold" disabled title="Wallet connection arrives in Stage 8">Connect Wallet</button>
         <button className="btn-wood grid size-10 place-items-center !p-0" title="Settings"><Icon name="gear" /></button>
       </div>

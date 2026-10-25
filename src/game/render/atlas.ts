@@ -29,13 +29,34 @@ export function record(draw: () => void): Recording {
   return ctx.rec;
 }
 
-/** Replays a recording onto a real 2D context, translated by (dx, dy). */
-export function replay(g: CanvasRenderingContext2D, rec: Recording, dx: number, dy: number) {
+export type ColorSwap = (c: string) => string;
+
+/** Replays a recording onto a real 2D context, translated by (dx, dy), optionally recoloured. */
+export function replay(g: CanvasRenderingContext2D, rec: Recording, dx: number, dy: number, swap?: ColorSwap) {
   const o = rec.ops;
   for (let i = 0; i < o.length; i += 5) {
-    g.fillStyle = o[i] as string;
+    g.fillStyle = swap ? swap(o[i] as string) : o[i] as string;
     g.fillRect((o[i + 1] as number) + dx, (o[i + 2] as number) + dy, o[i + 3] as number, o[i + 4] as number);
   }
+}
+
+/** Splits a recording at a horizontal line: rows above `cut` go to `top`, the rest to `bottom`. */
+export function splitAt(rec: Recording, cut: number): { top: Recording; bottom: Recording } {
+  const mk = (): Recording => ({ ops: [], x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity });
+  const top = mk(), bottom = mk();
+  const push = (r: Recording, c: string, x: number, y: number, w: number, h: number) => {
+    if (h <= 0) return;
+    r.ops.push(c, x, y, w, h);
+    r.x0 = Math.min(r.x0, x); r.y0 = Math.min(r.y0, y); r.x1 = Math.max(r.x1, x + w); r.y1 = Math.max(r.y1, y + h);
+  };
+  const o = rec.ops;
+  for (let i = 0; i < o.length; i += 5) {
+    const c = o[i] as string, x = o[i + 1] as number, y = o[i + 2] as number, w = o[i + 3] as number, h = o[i + 4] as number;
+    push(top, c, x, y, w, Math.min(h, cut - y));
+    const by = Math.max(y, cut);
+    push(bottom, c, x, by, w, y + h - by);
+  }
+  return { top, bottom };
 }
 
 export interface Frame { page: number; name: string; fx: number; fy: number; w: number; h: number; ox: number; oy: number }
@@ -45,6 +66,7 @@ const PAGE = 2048, GAP = 1;
 export class AtlasBuilder {
   pages: HTMLCanvasElement[] = [];
   frames = new Map<string, Frame>();
+  private ctxs: CanvasRenderingContext2D[] = [];
   private ctx!: CanvasRenderingContext2D;
   private cx = PAGE; private cy = 0; private shelf = 0;
 
@@ -53,7 +75,7 @@ export class AtlasBuilder {
     if (!this.ctx || this.cy + h > PAGE) {
       const c = document.createElement('canvas'); c.width = PAGE; c.height = PAGE;
       this.ctx = c.getContext('2d')!; this.ctx.imageSmoothingEnabled = false;
-      this.pages.push(c); this.cx = 0; this.cy = 0; this.shelf = 0;
+      this.pages.push(c); this.ctxs.push(this.ctx); this.cx = 0; this.cy = 0; this.shelf = 0;
     }
     const at = { page: this.pages.length - 1, fx: this.cx, fy: this.cy };
     this.cx += w + GAP; this.shelf = Math.max(this.shelf, h);
@@ -73,6 +95,18 @@ export class AtlasBuilder {
     const f: Frame = { ...s, name, w, h, ox: x0, oy: y0 };
     this.frames.set(name, f);
     return f;
+  }
+
+  /** Redraws an existing frame from its recording with a colour swap (seasonal recolouring). */
+  redraw(name: string, rec: Recording, swap?: ColorSwap) {
+    const f = this.frames.get(name);
+    if (!f) return;
+    const g = this.ctxs[f.page];
+    g.save();
+    g.clearRect(f.fx, f.fy, f.w, f.h);
+    g.beginPath(); g.rect(f.fx, f.fy, f.w, f.h); g.clip();
+    replay(g, rec, f.fx - f.ox, f.fy - f.oy, swap);
+    g.restore();
   }
 
   /** Adds frames that share one bounding box so an animation never jitters. */

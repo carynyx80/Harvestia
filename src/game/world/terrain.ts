@@ -7,10 +7,12 @@ type RGB = [number, number, number];
 
 export const enum Ground { Grass = 0, Water = 1, Sand = 2, Path = 3, Plaza = 4, Soil = 5, Paddy = 6 }
 
+// Colours pass through the active season swap; the cache is reset on every build.
 const cache = new Map<string, RGB>();
+let swap: (c: string) => string = c => c;
 const hex = (h: string): RGB => {
   let c = cache.get(h);
-  if (!c) { c = [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]; cache.set(h, c); }
+  if (!c) { const s = swap(h); c = [parseInt(s.slice(1, 3), 16), parseInt(s.slice(3, 5), 16), parseInt(s.slice(5, 7), 16)]; cache.set(h, c); }
   return c;
 };
 const GRASS = ['#44943d', '#4ea243', '#59b049', '#66bd50', '#76c958'];
@@ -78,8 +80,10 @@ function pathDist(x: number, y: number) {
 
 export interface TerrainResult { canvas: HTMLCanvasElement; type: Uint8Array; at: (x: number, y: number) => number }
 
-export function buildTerrain(): TerrainResult {
-  const canvas = document.createElement('canvas');
+/** Paints the terrain, recoloured by `colorSwap`, into `target` (or a new canvas). */
+export function buildTerrain(colorSwap: (c: string) => string = c => c, target?: HTMLCanvasElement): TerrainResult {
+  swap = colorSwap; cache.clear();
+  const canvas = target ?? document.createElement('canvas');
   canvas.width = WORLD_W; canvas.height = WORLD_H;
   const g = canvas.getContext('2d')!;
   const img = g.createImageData(WORLD_W, WORLD_H), d = img.data;
@@ -121,7 +125,7 @@ export function buildTerrain(): TerrainResult {
     if (type[y * WORLD_W + x] !== Ground.Grass) continue;
     const below = type[(y + 1) * WORLD_W + x], above = type[(y - 1) * WORLD_W + x];
     const i = (y * WORLD_W + x) * 4;
-    if (above === Ground.Soil || above === Ground.Paddy) { d[i] = 0x35; d[i + 1] = 0x76; d[i + 2] = 0x33; }
+    if (above === Ground.Soil || above === Ground.Paddy) { const lip = hex('#357633'); d[i] = lip[0]; d[i + 1] = lip[1]; d[i + 2] = lip[2]; }
     else if (below === Ground.Water || below === Ground.Sand) { d[i] *= .86; d[i + 1] *= .9; d[i + 2] *= .86; }
   }
   g.putImageData(img, 0, 0);

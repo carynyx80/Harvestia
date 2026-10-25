@@ -1,13 +1,23 @@
 // The playable world: terrain, every static object as a depth-sorted atlas
-// image, animated actors from generated sprite sheets, camera controls and
-// object selection. Game rules arrive in later stages; this scene owns rendering
-// and input only.
+// image, animated actors from generated sprite sheets, the living environment
+// (day/night, weather, seasons, water, wildlife, crop growth), camera controls
+// and object selection. Game rules arrive in later stages; this scene owns
+// rendering and input only.
 import * as Phaser from 'phaser';
 import HV from '../art/sprites';
-import { AtlasBuilder, GraphicsContext, record, type Frame } from '../render/atlas';
-import { Ground, buildTerrain, type TerrainResult } from '../world/terrain';
+import { AtlasBuilder, GraphicsContext, record, replay, splitAt, type Frame, type Recording } from '../render/atlas';
+import { buildTerrain, type TerrainResult } from '../world/terrain';
 import { buildLayout, type ActorSpec, type Hotspot, type WorldLayout } from '../world/layout';
-import { PLOTS, TILE, WORLD_H, WORLD_W, riverC, riverDepth, riverHW } from '../world/geometry';
+import { PLOTS, TILE, WORLD_H, WORLD_W } from '../world/geometry';
+import { seasonSwap } from '../env/palette';
+import type { Season } from '../env/environment';
+import { EnvironmentSystem } from '../systems/EnvironmentSystem';
+import { LightingSystem } from '../systems/LightingSystem';
+import { WeatherSystem } from '../systems/WeatherSystem';
+import { WaterSystem } from '../systems/WaterSystem';
+import { WildlifeSystem } from '../systems/WildlifeSystem';
+import { CropSystem } from '../systems/CropSystem';
+import { PixelParticles } from '../systems/PixelParticles';
 import { useGame, type AnimalKind, type Selection } from '@/store/game';
 
 const ANIMALS: AnimalKind[] = ['cow', 'sheep', 'pig', 'chicken', 'duck'];
@@ -17,7 +27,7 @@ const ZONE_OF: Record<AnimalKind, string> = { cow: 'Cow Pasture', sheep: 'Sheep 
 const TERRAIN_NAME = ['Meadow', 'Water', 'Riverbank', 'Dirt road', 'Cobblestone', 'Tilled soil', 'Rice paddy'];
 const MINI = { w: 192, h: 120, pad: 16 };
 
-interface Animal { id: number; kind: AnimalKind; sprite: Phaser.GameObjects.Sprite; x: number; y: number; tx: number; ty: number; moving: boolean; wait: number; flip: boolean; rect: [number, number, number, number]; peck: number }
+interface Animal { id: number; kind: AnimalKind; sprite: Phaser.GameObjects.Sprite; x: number; y: number; tx: number; ty: number; moving: boolean; wait: number; flip: boolean; rect: [number, number, number, number]; peck: number; graze: boolean; grazeT: number }
 interface Walker { id: number; key: string; sprite: Phaser.GameObjects.Sprite; path: [number, number][]; i: number; x: number; y: number; speed: number; flip: boolean }
 interface Tractor { sprite: Phaser.GameObjects.Sprite; x: number; y: number; dir: 1 | -1; minX: number; maxX: number; exhaust: Phaser.GameObjects.Particles.ParticleEmitter }
 
@@ -30,7 +40,23 @@ export class WorldScene extends Phaser.Scene {
   private tractor?: Tractor;
   private waterer?: { x: number; y: number };
   private fx: { g: Phaser.GameObjects.Graphics; ctx: GraphicsContext; draw: (t: number) => void }[] = [];
-  private sparks: { x: number; y: number; ph: number; l: number; river: boolean }[] = [];
+  private atlas!: AtlasBuilder;
+  /** nature frames and flat ground decoration kept as recordings so seasons can recolour them */
+  private natureFrames: { name: string; rec: Recording; variant: number }[] = [];
+  private groundRecs: { rec: Recording; nature: boolean; variant: number }[] = [];
+  private swayers: { img: Phaser.GameObjects.Image; x: number; ph: number }[] = [];
+  private windows: [number, number, number, number][] = [];
+  private lamps: [number, number][] = [];
+  private env = new EnvironmentSystem();
+  private lighting!: LightingSystem;
+  private weather!: WeatherSystem;
+  private water!: WaterSystem;
+  private wildlife!: WildlifeSystem;
+  private crops!: CropSystem;
+  private particles!: PixelParticles;
+  private season: Season = 'spring';
+  private dry = false;
+  private envSync = 0;
   private hoverG!: Phaser.GameObjects.Graphics;
   private gridG!: Phaser.GameObjects.Graphics;
   private viewG!: Phaser.GameObjects.Graphics;
@@ -52,6 +78,7 @@ export class WorldScene extends Phaser.Scene {
     this.buildStatic();
     this.buildActors();
     this.buildFx();
+    this.buildEnvironment();
     this.setupCamera();
     this.setupInput();
     this.unsub = useGame.subscribe((s, p) => {
@@ -59,6 +86,14 @@ export class WorldScene extends Phaser.Scene {
       if (s.zoomStep && s.zoomStep !== p.zoomStep) this.zoomAt(this.scale.width / 2, this.scale.height / 2, s.zoomStep.dir);
       if (s.grid !== p.grid) this.gridG.setVisible(s.grid);
       if (s.selected !== p.selected && !s.selected) this.drawOverlay(0);
+      if (s.envCommand && s.envCommand !== p.envCommand) {
+        const c = s.envCommand, e = this.env;
+        if (c.hour !== undefined) e.hour = c.hour;
+        if (c.speed !== undefined) e.speed = c.speed;
+        if (c.weather) e.weather = c.weather;
+        if (c.season && c.season !== this.season) this.applySeason(c.season);
+        this.envSync = 0;
+      }
     });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.unsub?.());
     this.events.once(Phaser.Scenes.Events.DESTROY, () => this.unsub?.());
@@ -77,33 +112,70 @@ export class WorldScene extends Phaser.Scene {
 
   private buildStatic() {
     const { layout, terrain } = this;
-    // flat decoration is baked straight into the ground bitmap
-    const gctx = terrain.canvas.getContext('2d')!;
-    HV.use(gctx);
-    for (const it of layout.items) if (it.ground) it.draw();
+    // flat decoration is baked into the ground bitmap; recordings are kept for seasonal repaints
+    for (const it of layout.items) if (it.ground) this.groundRecs.push({ rec: record(it.draw), nature: !!it.nature, variant: it.variant ?? 0 });
+    this.paintGroundDecor();
     this.textures.addCanvas('ground', terrain.canvas);
     this.add.image(0, 0, 'ground').setOrigin(0).setDepth(-1000);
 
-    const atlas = new AtlasBuilder();
-    const placed: { name: string; depth: number }[] = [];
+    // windows and street lamps report where they are while their buildings are recorded
+    HV.onWindow = (x, y, w, h) => this.windows.push([x, y, w, h]);
+    HV.onLamp = (x, y) => this.lamps.push([x, y]);
+    const atlas = this.atlas = new AtlasBuilder();
+    const placed: { name: string; depth: number; sway?: number }[] = [];
     let n = 0;
-    for (const it of [...layout.items.filter(i => !i.ground), ...layout.front]) {
+    const put = (rec: Recording, depth: number, nature: boolean, variant: number, sway?: number) => {
       const name = `s${n++}`;
-      if (atlas.add(name, record(it.draw))) placed.push({ name, depth: it.y });
+      if (!atlas.add(name, rec)) return;
+      placed.push({ name, depth, sway });
+      if (nature) this.natureFrames.push({ name, rec, variant });
+    };
+    for (const it of [...layout.items.filter(i => !i.ground), ...layout.front]) {
+      const rec = record(it.draw);
+      if (it.sway) {
+        // trunk stays planted; the canopy above the cut line sways with the wind
+        const { top, bottom } = splitAt(rec, it.y - it.sway);
+        put(bottom, it.y, !!it.nature, it.variant ?? 0);
+        put(top, it.y + .5, !!it.nature, it.variant ?? 0, 1);
+      } else put(rec, it.y, !!it.nature, it.variant ?? 0);
     }
+    HV.onWindow = undefined; HV.onLamp = undefined;
     this.buildActorFrames(atlas);
     this.registerAtlas(atlas);
     for (const p of placed) {
       const { key, frame, f } = this.tex(p.name);
-      this.add.image(f.ox, f.oy, key, frame).setOrigin(0).setDepth(p.depth);
+      const img = this.add.image(f.ox, f.oy, key, frame).setOrigin(0).setDepth(p.depth);
+      if (p.sway !== undefined) this.swayers.push({ img, x: f.ox, ph: HV.hash(f.ox, f.oy, 3) * 6.28 });
     }
+  }
+
+  /** Replays flat ground decoration onto the terrain bitmap in the current season's colours. */
+  private paintGroundDecor() {
+    const g = this.terrain.canvas.getContext('2d')!;
+    for (const d of this.groundRecs) replay(g, d.rec, 0, 0, d.nature ? seasonSwap(this.season, d.variant, this.dry) : undefined);
+  }
+
+  /** Repaints terrain and every nature sprite for a new season (or drought), masked by a quick fade. */
+  private applySeason(season: Season, dry = this.dry) {
+    const cam = this.cameras.main;
+    this.season = season; this.dry = dry;
+    this.env.season = season;
+    cam.fadeOut(160, 255, 255, 255);
+    cam.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      buildTerrain(seasonSwap(season, 0, dry), this.terrain.canvas);
+      this.paintGroundDecor();
+      this.textures.get('ground').source[0].update();
+      for (const f of this.natureFrames) this.atlas.redraw(f.name, f.rec, seasonSwap(season, f.variant, dry));
+      this.atlas.pages.forEach((_, i) => this.textures.get(`atlas${i}`).source[0].update());
+      cam.fadeIn(260, 255, 255, 255);
+    });
   }
 
   private buildActorFrames(atlas: AtlasBuilder) {
     const two = (fn: (f: number, flip: boolean) => void, frames: number[]) => (flip: boolean) => frames.map(f => () => fn(f, flip));
     const sets: Record<string, (flip: boolean) => (() => void)[]> = {
-      cow: two((f, fl) => HV.cow(0, 0, f, fl), [0, 1]),
-      sheep: two((f, fl) => HV.sheep(0, 0, f, fl), [0, 1]),
+      cow: fl => [() => HV.cow(0, 0, 0, fl), () => HV.cow(0, 0, 1, fl), () => HV.cow(0, 0, 0, fl, '#2a2624', true)],
+      sheep: fl => [() => HV.sheep(0, 0, 0, fl), () => HV.sheep(0, 0, 1, fl), () => HV.sheep(0, 0, 0, fl, true)],
       pig: two((f, fl) => HV.pig(0, 0, f, fl), [0, 1]),
       chicken: two((f, fl) => HV.chicken(0, 0, f, fl), [0, 3]),
       duck: two((f, fl) => HV.duck(0, 0, f, fl), [0, 1]),
@@ -117,6 +189,7 @@ export class WorldScene extends Phaser.Scene {
       } else if (a.kind === 'waterer') atlas.addSet('waterer', [() => HV.farmer(0, 0, 0, false, a.pal, 'water')]);
     });
     atlas.addSet('blades', Array.from({ length: 24 }, (_, k) => () => HV.blades(0, 0, k * (Math.PI / 2) / 24)));
+    for (const crop of HV.CROPS as string[]) atlas.addSet(`crop-${crop}`, [0, 1, 2, 3].map(st => () => HV.crop(crop, st, 0, 0)));
   }
 
   private anim(key: string, prefix: string, count: number, rate: number) {
@@ -158,7 +231,7 @@ export class WorldScene extends Phaser.Scene {
         for (let k = 0; k < a.count; k++) {
           const x = x0 + HV.hash(k, a.seed, 1) * (x1 - x0), y = y0 + HV.hash(k, a.seed, 2) * (y1 - y0);
           const sprite = this.sprite(`${a.kind}-r`, x, y);
-          this.animals.push({ id: id++, kind: a.kind, sprite, x, y, tx: x, ty: y, moving: false, wait: HV.hash(k, a.seed, 3) * 3, flip: HV.hash(k, a.seed, 4) < .5, rect: a.rect, peck: HV.hash(k, a.seed, 5) * 6 });
+          this.animals.push({ id: id++, kind: a.kind, sprite, x, y, tx: x, ty: y, moving: false, wait: HV.hash(k, a.seed, 3) * 3, flip: HV.hash(k, a.seed, 4) < .5, rect: a.rect, peck: HV.hash(k, a.seed, 5) * 6, graze: false, grazeT: HV.hash(k, a.seed, 6) * 3 });
         }
       }
     });
@@ -178,8 +251,10 @@ export class WorldScene extends Phaser.Scene {
       if (a.moving || a.kind === 'duck') { if (a.sprite.anims.currentAnim?.key !== key || !a.sprite.anims.isPlaying) a.sprite.play(key); }
       else {
         a.sprite.stop();
-        const peck = a.kind === 'chicken' && Math.floor(t * 3 + a.peck) % 6 < 2 ? 1 : 0;
-        const tt = this.tex(`${key}-${peck}`); a.sprite.setTexture(tt.key, tt.frame);
+        // idle cows and sheep alternate grazing (head down) and looking up
+        if ((a.kind === 'cow' || a.kind === 'sheep') && (a.grazeT -= dt) <= 0) { a.graze = !a.graze; a.grazeT = a.graze ? 2 + Math.random() * 3 : 1 + Math.random() * 2; }
+        const idle = a.kind === 'chicken' ? (Math.floor(t * 3 + a.peck) % 6 < 2 ? 1 : 0) : (a.graze && (a.kind === 'cow' || a.kind === 'sheep') ? 2 : 0);
+        const tt = this.tex(`${key}-${idle}`); a.sprite.setTexture(tt.key, tt.frame);
       }
       this.place(a.sprite, key, a.x, a.y, FOOT[a.kind]);
     }
@@ -215,21 +290,6 @@ export class WorldScene extends Phaser.Scene {
     for (const [x, y] of L.chimneys)
       this.add.particles(x, y, 'puff', { lifespan: 2800, speedX: { min: 0, max: 4 }, speedY: { min: -8, max: -5 }, scale: { start: .6, end: 1.6 }, alpha: { start: .55, end: 0 }, tint: 0xeeeeee, frequency: 380 }).setDepth(40000);
 
-    for (let i = 0; i < 2600 && this.sparks.length < 260; i++) {
-      const x = Math.floor(HV.hash(i, 3, 70) * WORLD_W), y = Math.floor(HV.hash(i, 4, 70) * WORLD_H);
-      const at = this.terrain.at;
-      if (at(x, y) === Ground.Water && at(x + 4, y) === Ground.Water && at(x - 2, y) === Ground.Water)
-        this.sparks.push({ x, y, ph: HV.hash(i, 5, 70) * 6.28, l: 2 + Math.floor(HV.hash(i, 6, 70) * 3), river: Math.abs(riverDepth(x, y)) < 30 && x > 400 });
-    }
-    this.gfx(-900, t => {
-      for (const s of this.sparks) {
-        const v = Math.sin(t * 1.8 + s.ph);
-        if (v < .35) continue;
-        let { x, y } = s;
-        if (s.river) { y = (s.y + t * 6) % WORLD_H; const c = riverC(y); x = s.x - riverC(s.y) + c; if (Math.abs(x - c) > riverHW(y) - 2) continue; }
-        HV.R(x, y, s.l, 1, v > .8 ? '#e3f6ff' : '#a6dcf7');
-      }
-    });
     this.gfx(181, t => HV.ticker(L.ticker.x, L.ticker.y, 52, 8, t));
     this.gfx(257, t => HV.fountainWater(L.fountain.x, L.fountain.y, t));
     L.flags.forEach((f, i) => this.gfx(i === 0 ? 181 : i === 1 ? 405 : 482, t => HV.flag(f.x, f.y, t + i, f.col, f.col2)));
@@ -249,19 +309,26 @@ export class WorldScene extends Phaser.Scene {
       }
     });
     if (this.waterer) { const w = this.waterer; this.gfx(w.y + 15, t => { const ph = (t * 3) % 1; for (let k = 0; k < 3; k++) HV.P(w.x + 10 + k, w.y + 10 + ((ph * 6 + k * 2) % 6), '#8fd0ee'); }); }
-    const clouds: [number, number, number][] = [[120, 120, 1.2], [520, 380, 1.5], [860, 80, 1], [300, 560, 1.3]];
-    const birds: [number, number, number][] = [[0, 90, 0], [-40, 104, 1], [-24, 96, 2]];
-    this.gfx(90000, t => {
-      for (const c of clouds) HV.cloud(((c[0] + t * 5) % (WORLD_W + 200)) - 100, c[1], c[2]);
-      const bf = Math.floor(t * 5);
-      for (const b of birds) HV.bird(((b[0] + t * 22) % (WORLD_W + 120)) - 60, b[1] + Math.sin(t + b[2]) * 3, bf + b[2]);
-    });
-
     this.gridG = this.add.graphics().setDepth(150000).setVisible(useGame.getState().grid);
     this.gridG.lineStyle(1, 0xfff3b0, .28);
     for (let x = 0; x <= WORLD_W; x += TILE) this.gridG.lineBetween(x + .5, 0, x + .5, WORLD_H);
     for (let y = 0; y <= WORLD_H; y += TILE) this.gridG.lineBetween(0, y + .5, WORLD_W, y + .5);
     this.hoverG = this.add.graphics().setDepth(200000);
+  }
+
+  // ------------------------------------------------------------------ living environment
+  private buildEnvironment() {
+    this.particles = new PixelParticles(this.add.graphics().setDepth(60000));
+    this.lighting = new LightingSystem(this, this.windows, this.lamps);
+    this.weather = new WeatherSystem(this, this.terrain);
+    this.water = new WaterSystem(this, this.terrain, () => this.animals.filter(a => a.kind === 'duck'));
+    this.weather.onWaterHit = (x, y) => this.water.ripple(x, y, 3);
+    this.wildlife = new WildlifeSystem(this, this.terrain);
+    this.crops = new CropSystem(this.layout.crops, {
+      sprite: (prefix, x, y) => this.sprite(prefix, x, y),
+      setFrame: (sp, name) => { const t = this.tex(name); sp.setTexture(t.key, t.frame); },
+      offset: prefix => { const f = this.frames.get(`${prefix}-0`)!; return { ox: f.ox, oy: f.oy }; },
+    }, this.particles);
   }
 
   // ------------------------------------------------------------------ camera
@@ -276,7 +343,7 @@ export class WorldScene extends Phaser.Scene {
     this.mini.centerOn(WORLD_W / 2, WORLD_H / 2).setBackgroundColor('#1d3a1f').setRoundPixels(false);
     this.viewG = this.add.graphics().setDepth(300000);
     cam.ignore(this.viewG);
-    this.mini.ignore([this.hoverG, this.gridG, ...this.fx.map(f => f.g)]);
+    this.mini.ignore([this.hoverG, this.gridG, ...this.fx.map(f => f.g), ...this.weather.objects, ...this.water.objects, ...this.wildlife.objects]);
     this.positionMinimap();
     this.scale.on(Phaser.Scale.Events.RESIZE, (size: Phaser.Structs.Size) => {
       cam.setSize(size.width, size.height);
@@ -438,9 +505,22 @@ export class WorldScene extends Phaser.Scene {
     if (k.W.isDown || k.UP.isDown) cam.scrollY -= pan;
     if (k.S.isDown || k.DOWN.isDown) cam.scrollY += pan;
 
+    const env = this.env;
+    env.update(dt);
+    if ((env.weather === 'drought') !== this.dry && !cam.fadeEffect.isRunning) this.applySeason(this.season, env.weather === 'drought');
     this.updateActors(dt, t);
     for (const f of this.fx) { f.g.clear(); HV.use(f.ctx); f.draw(t); }
+    // tree canopies sway: gentle in fair weather, hard in storms
+    const amp = .55 + env.wind * .45, freq = .6 + env.wind * .5;
+    for (const s of this.swayers) s.img.x = s.x + Math.round(Math.sin(t * freq + s.ph) * amp);
+    this.crops.update(t, dt, env);
+    this.water.update(t, dt, env);
+    this.weather.update(t, dt, env, cam.worldView);
+    this.wildlife.update(t, dt, env);
+    this.lighting.update(t, dt, env);
+    this.particles.update(dt);
     this.drawOverlay(t);
+    if ((this.envSync -= dt) <= 0) { useGame.getState().setEnv(env.snapshot()); this.envSync = .25; }
 
     const v = cam.worldView;
     this.viewG.clear().lineStyle(8, 0xfff3b0, 1).strokeRect(v.x, v.y, v.width, v.height);

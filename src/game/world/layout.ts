@@ -14,8 +14,14 @@ export interface Hotspot {
   name: string; zone: Zone; play: string; stage: number;
   plot?: number; crop?: CropType | null; cropStage?: number;
 }
-/** depth = y (the object's ground line); ground = baked flat into the terrain bitmap */
-export interface StaticItem { y: number; draw: () => void; ground?: boolean }
+/**
+ * depth = y (the object's ground line); ground = baked flat into the terrain bitmap;
+ * nature = recoloured by season (variant picks autumn leaf colour);
+ * sway = canopy rows above y - sway move with the wind.
+ */
+export interface StaticItem { y: number; draw: () => void; ground?: boolean; nature?: boolean; variant?: number; sway?: number }
+/** A crop sprite in a planting cell. demo cells loop through the growth animation. */
+export interface CropSpec { plot: number; col: number; row: number; x: number; y: number; crop: CropType; stage: number; demo: boolean }
 export interface Label { text: string; x: number; y: number }
 export interface Focus { id: string; x: number; y: number }
 
@@ -27,7 +33,7 @@ export type ActorSpec =
   | { kind: 'tractor'; x: number; y: number; minX: number; maxX: number };
 
 export interface WorldLayout {
-  items: StaticItem[]; front: StaticItem[]; hot: Hotspot[]; cells: CropCell[]; labels: Label[]; actors: ActorSpec[];
+  items: StaticItem[]; front: StaticItem[]; hot: Hotspot[]; cells: CropCell[]; crops: CropSpec[]; labels: Label[]; actors: ActorSpec[];
   /** named camera targets for the HUD navigation */
   focus: Record<string, Focus>;
   windmill: { x: number; y: number }; ticker: { x: number; y: number }; fountain: { x: number; y: number };
@@ -78,7 +84,7 @@ export function buildLayout(terrain: TerrainResult): WorldLayout {
   reserve(240, 166, 40, 14);
   spot({ id: 'seedcrates', kind: 'machine', x: 242, y: 166, w: 38, h: 14, name: 'Seed Storage', zone: 'Main Farm', play: 'Seed crates — your planting inventory.', stage: 4 });
 
-  const cells: CropCell[] = [];
+  const cells: CropCell[] = [], crops: CropSpec[] = [];
   for (const p of PLOTS) {
     if (p.kind === 'expansion') {
       flat(() => {
@@ -92,17 +98,17 @@ export function buildLayout(terrain: TerrainResult): WorldLayout {
       continue;
     }
     reserve(p.x - 2, p.y - 2, p.w + 4, p.h + 4);
-    const name = p.kind === 'paddy' ? 'Rice Paddy' : p.crop ? `${CROP_NAMES[p.crop]} field` : 'Tilled plot';
-    const play = p.kind === 'watered' ? 'Watered and empty — ready for planting.'
+    const name = p.kind === 'paddy' ? 'Rice Paddy' : p.crop ? `${CROP_NAMES[p.crop]} field` : 'Growth demo plot';
+    const play = p.kind === 'watered' ? 'Loops the plant → sprout → grow → harvest animation. Real planting arrives with core gameplay.'
       : p.kind === 'paddy' ? 'Flooded field; rice needs the irrigation pump running.'
       : `${STAGE_NAMES[p.stage]}. Plant → water → grow → harvest, with timers validated server-side.`;
     spot({ id: 'plot' + p.index, kind: 'plot', plot: p.index, crop: p.crop, cropStage: p.stage, x: p.x, y: p.y, w: p.w, h: p.h, name, zone: 'Main Farm', play, stage: 5 });
     for (const c of plotCells(p)) {
       cells.push(c);
-      if (!p.crop || p.kind === 'watered') continue;
-      const st = p.stage === 3 && hash(c.x, c.y, 2) < .08 ? 2 : p.stage;
-      const crop = p.crop;
-      add(c.y, () => HV.crop(crop, st, c.x, c.y));
+      if (p.kind === 'watered') { crops.push({ plot: p.index, col: c.col, row: c.row, x: c.x, y: c.y, crop: 'wheat', stage: 0, demo: true }); continue; }
+      if (!p.crop) continue;
+      const stage = p.stage === 3 && hash(c.x, c.y, 2) < .08 ? 2 : p.stage;
+      crops.push({ plot: p.index, col: c.col, row: c.row, x: c.x, y: c.y, crop: p.crop, stage, demo: false });
     }
   }
   add(250, () => HV.scarecrow(126, 250));
@@ -178,12 +184,14 @@ export function buildLayout(terrain: TerrainResult): WorldLayout {
     const k = 1.1 + hash(Math.round(a * 100), 3, 41) * .12, rx = Math.round(POND.x + Math.cos(a) * POND.rx * k), ry = Math.round(POND.y + Math.sin(a) * POND.ry * k);
     if (Math.sin(a) < -.2 && Math.cos(a) > .2 && Math.cos(a) < .8) continue; // dock side stays open
     const r = hash(Math.round(a * 100), 4, 41);
-    if (r < .45) add(ry, () => HV.reeds(rx, ry)); else if (r < .55) add(ry, () => HV.rock(rx, ry)); else if (r < .62) add(ry + 2, () => HV.bush(rx, ry + 2, Math.round(a * 10), '#fff6e8'));
+    if (r < .45) items.push({ y: ry, nature: true, draw: () => HV.reeds(rx, ry) });
+    else if (r < .55) add(ry, () => HV.rock(rx, ry));
+    else if (r < .62) items.push({ y: ry + 2, nature: true, variant: Math.round(a * 10), draw: () => HV.bush(rx, ry + 2, Math.round(a * 10), '#fff6e8') });
   }
   add(536, () => HV.dock(148, 512, 24)); reserve(30, 500, 170, 110);
   for (let i = 0; i < 3; i++) for (let j = 0; j < 4; j++) {
     const tx = 372 + j * 30 + (i % 2) * 12, ty = 500 + i * 28;
-    add(ty, () => HV.tree(tx, ty, i * 7 + j, 8, j % 2 ? '#e0402f' : '#f2a33a')); reserve(tx - 10, ty - 22, 20, 26);
+    items.push({ y: ty, nature: true, sway: 9, variant: i + j, draw: () => HV.tree(tx, ty, i * 7 + j, 8, j % 2 ? '#e0402f' : '#f2a33a') }); reserve(tx - 10, ty - 22, 20, 26);
   }
   spot({ id: 'orchard', kind: 'nature', x: 356, y: 470, w: 140, h: 90, name: 'Fruit Orchard', zone: 'Main Farm', play: 'Fruit trees with long growth cycles and seasonal yields.', stage: 5 });
 
@@ -214,7 +222,7 @@ export function buildLayout(terrain: TerrainResult): WorldLayout {
     { kind: 'tractor', x: 352, y: 264, minX: 350, maxX: 398 },
   ];
   return {
-    items, front, hot, cells, labels, actors, focus,
+    items, front, hot, cells, crops, labels, actors, focus,
     windmill: { x: 430, y: 141 }, ticker: { x: 726, y: 115 }, fountain: { x: 851, y: 248 },
     flags: [{ x: 752, y: 68, col: '#3f8a8c', col2: '#f2c94c' }, { x: 893, y: 314, col: '#4e8a3c', col2: '#f2c94c' }, { x: 756, y: 466, col: '#c4553b', col2: '#f2c94c' }],
     sprinklers: [[378, 435], [450, 379]], bunting: [704, 822, 462],
@@ -237,9 +245,10 @@ function scatter(terrain: TerrainResult, items: StaticItem[], occ: [number, numb
   const near = (x: number, y: number, d: number) => trees.some(t => Math.abs(t[0] - x) < d && Math.abs(t[1] - y) < d * .8);
   const put = (x: number, y: number, kind: 'pine' | 'tree' | 'bush', seed: number) => {
     trees.push([x, y]);
-    if (kind === 'pine') add(y, () => HV.pine(x, y, seed, .9 + (seed % 3) * .15));
-    else if (kind === 'tree') add(y, () => HV.tree(x, y, seed, 8 + (seed % 4), seed % 9 === 0 ? '#e0402f' : null));
-    else add(y, () => HV.bush(x, y, seed, seed % 3 ? null : ['#f08ab0', '#fff6e8', '#f7d64a'][(seed >> 2) % 3]));
+    const variant = Math.abs(seed) % 7;
+    if (kind === 'pine') items.push({ y, nature: true, sway: 4, draw: () => HV.pine(x, y, seed, .9 + (seed % 3) * .15) });
+    else if (kind === 'tree') items.push({ y, nature: true, sway: 9, variant, draw: () => HV.tree(x, y, seed, 8 + (seed % 4), seed % 9 === 0 ? '#e0402f' : null) });
+    else items.push({ y, nature: true, variant, draw: () => HV.bush(x, y, seed, seed % 3 ? null : ['#f08ab0', '#fff6e8', '#f7d64a'][(seed >> 2) % 3]) });
   };
   for (let x = -4; x < WORLD_W + 8; x += 11) {
     for (const y of [16 + rnd() * 12, 32 + rnd() * 6]) { const xx = x + rnd() * 6; if (free(xx, y, 5) && !near(xx, y, 9)) put(xx, y, rnd() < .45 ? 'pine' : 'tree', (x * 7 + y) | 0); }
@@ -258,14 +267,14 @@ function scatter(terrain: TerrainResult, items: StaticItem[], occ: [number, numb
     if (at(x, y) !== Ground.Grass || at(x, y - 2) !== Ground.Grass) continue;
     if (occ.some(([a, b, w, h]) => x > a && x < a + w && y > b && y < b + h)) continue;
     const r = rnd();
-    if (r < .55) items.push({ y: -1, ground: true, draw: () => HV.tuft(x, y) });
-    else if (r < .8) items.push({ y: -1, ground: true, draw: () => HV.flowers(x, y, i) });
+    if (r < .55) items.push({ y: -1, ground: true, nature: true, draw: () => HV.tuft(x, y) });
+    else if (r < .8) items.push({ y: -1, ground: true, nature: true, draw: () => HV.flowers(x, y, i) });
     else if (r < .88 && free(x, y, 4)) { const big = rnd() < .3; add(y, () => HV.rock(x, y, big ? 1.5 : 1)); }
   }
   for (let y = 10; y < WORLD_H; y += 7) for (const side of [-1, 1]) {
     const x = Math.round(riverC(y) + side * (riverHW(y) + 3 + rnd() * 3));
     if (at(x, y) === Ground.Sand || at(x, y) === Ground.Grass) {
-      if (rnd() < .4) add(y, () => { HV.R(x, y - 5, 1, 5, '#4f8a3c'); HV.R(x + 1, y - 6, 1, 6, '#5fae3f'); HV.P(x + 1, y - 7, '#8a5a32'); });
+      if (rnd() < .4) items.push({ y, nature: true, draw: () => { HV.R(x, y - 5, 1, 5, '#4f8a3c'); HV.R(x + 1, y - 6, 1, 6, '#5fae3f'); HV.P(x + 1, y - 7, '#8a5a32'); } });
       else if (rnd() < .12) add(y, () => HV.rock(x, y));
     }
   }

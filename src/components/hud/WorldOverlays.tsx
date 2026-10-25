@@ -1,7 +1,8 @@
 'use client';
 import { useGame } from '@/store/game';
+import { SEASONS, WEATHER_LABEL, formatHour, type Season, type Weather } from '@/game/env/environment';
 import { ApiStatus } from './ApiStatus';
-import { Icon } from './Icon';
+import { Icon, type IconName } from './Icon';
 
 const LABELS: [string, number, number][] = [
   ['Livestock Ranch', 140, 22], ['Main Farm', 238, 214], ['Mill & Industry', 520, 96],
@@ -37,16 +38,36 @@ export function MinimapFrame() {
   );
 }
 
+const WEATHER_BTNS: [Weather, IconName][] = [['sunny', 'sun'], ['cloudy', 'cloud'], ['rainy', 'rain'], ['stormy', 'storm'], ['drought', 'drought']];
+const SPEEDS: [number, string][] = [[0, 'Pause'], [1, '1×'], [10, '10×'], [60, '60×']];
+const SEASON_NAME: Record<Season, string> = { spring: 'Spring', summer: 'Summer', autumn: 'Autumn', winter: 'Winter' };
+
+/** Stage review controls: time, weather, season, zoom and grid. */
 export function ViewControls() {
   const zoom = useGame(s => s.camera.zoom), grid = useGame(s => s.grid), toggleGrid = useGame(s => s.toggleGrid), requestZoom = useGame(s => s.requestZoom);
+  const env = useGame(s => s.env), commandEnv = useGame(s => s.commandEnv);
+  const chip = (on: boolean) => `${on ? 'btn-gold' : 'btn-wood'} !px-1.5 !py-0.5 text-xs`;
   return (
     <div className="panel pointer-events-auto absolute right-2.5 bottom-2.5 hidden w-[262px] px-3 py-2.5 lg:block">
       <div className="flex items-center justify-between">
-        <b className="text-base">Stage 2 · Playable world</b>
+        <b className="text-base">Stage 3 · Living world</b>
         <a href="/concept/index.html" className="text-xs text-muted underline">Stage 1 art</a>
       </div>
-      <div className="mt-1 text-xs text-muted">Drag or WASD to move · scroll to zoom · click anything</div>
-      <div className="mt-1 mb-2"><ApiStatus /></div>
+      <div className="mt-1 flex items-center gap-2">
+        <Icon name={env.night > .5 ? 'moon' : 'sun'} size={18} />
+        <input type="range" min={0} max={23.99} step={.25} value={env.hour} aria-label="Time of day" className="h-2 flex-1 accent-[#a8743f]" onChange={e => commandEnv({ hour: Number(e.target.value) })} />
+        <b className="w-11 text-right text-sm">{formatHour(env.hour)}</b>
+      </div>
+      <div className="mt-1.5 flex gap-1" role="group" aria-label="Time speed">
+        {SPEEDS.map(([v, l]) => <button key={v} className={chip(env.speed === v)} onClick={() => commandEnv({ speed: v })} aria-pressed={env.speed === v}>{l}</button>)}
+      </div>
+      <div className="mt-1.5 flex gap-1" role="group" aria-label="Weather">
+        {WEATHER_BTNS.map(([w, i]) => <button key={w} className={`${chip(env.weather === w)} grid place-items-center`} onClick={() => commandEnv({ weather: w })} aria-pressed={env.weather === w} title={WEATHER_LABEL[w]}><Icon name={i} size={18} /></button>)}
+      </div>
+      <div className="mt-1.5 grid grid-cols-4 gap-1" role="group" aria-label="Season">
+        {SEASONS.map(s => <button key={s} className={chip(env.season === s)} onClick={() => commandEnv({ season: s })} aria-pressed={env.season === s}>{SEASON_NAME[s]}</button>)}
+      </div>
+      <div className="mt-2 mb-1.5 flex items-center justify-between border-t-2 border-dashed border-parch-d pt-1.5"><ApiStatus /><span className="text-xs text-muted">Drag · WASD · scroll</span></div>
       <div className="flex items-center gap-1.5">
         <button className="btn-wood !px-2.5 !py-0.5" onClick={() => requestZoom(-1)} aria-label="Zoom out">−</button>
         <span className="w-12 text-center text-sm font-semibold">{zoom.toFixed(zoom % 1 ? 1 : 0)}×</span>
