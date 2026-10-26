@@ -7,7 +7,7 @@
 import { applyAction, type FarmAction } from '../../shared/sim/actions';
 import { tick } from '../../shared/sim/engine';
 import type { FarmState } from '../../shared/sim/state';
-import { ApiError, getFarm, getMarket, loadSession, openLive, postAction, resetFarm, saveSession, signInGuest } from './api';
+import { ApiError, getFarm, getMarket, loadSession, logout, openLive, postAction, resetFarm, saveSession, signInGuest, type Session } from './api';
 import { loadState, saveState } from '@/game/sim/save';
 import { pushEvents, setActionSender, useGame } from '@/store/game';
 
@@ -70,8 +70,8 @@ function send(action: FarmAction) {
   void flush();
 }
 
-async function connect(): Promise<boolean> {
-  let session = loadSession();
+async function connect(given?: Session): Promise<boolean> {
+  let session = given ?? loadSession();
   try {
     if (!session) { session = await signInGuest(); saveSession(session); }
     let f;
@@ -83,7 +83,7 @@ async function connect(): Promise<boolean> {
     token = session.token; seq = f.lastSeq; confirmed = f.state;
     useGame.setState({
       serverOffset: f.serverTime - Date.now(), connection: 'online',
-      session: { playerId: session.player.id, playerName: session.player.name, farmId: f.farmId, farmName: f.name },
+      session: { playerId: session.player.id, playerName: session.player.name, farmId: f.farmId, farmName: f.name, wallet: session.player.wallet ?? null },
     });
     rebase();
     live?.close();
@@ -133,6 +133,28 @@ export function startSync() {
   const cacheId = setInterval(() => { const f = useGame.getState().farm; if (f) saveState(f); }, 10_000);
   const marketId = setInterval(() => void refreshMarket(), 60_000);
   return () => { clearInterval(tickId); clearInterval(syncId); clearInterval(cacheId); clearInterval(marketId); live?.close(); setActionSender(null); };
+}
+
+/** The current session token (for wallet sign-in, which links the wallet to this guest farm). */
+export const currentToken = () => token;
+
+/** Switches to a session returned by wallet sign-in: drops queued actions for the old farm and loads the new one. */
+export async function adoptSession(session: Session) {
+  saveSession(session);
+  pending.length = 0; token = null; confirmed = null;
+  const ok = await connect(session);
+  if (!ok) useGame.setState({ connection: 'offline' });
+  return ok;
+}
+
+/** Ends this session and starts a fresh guest farm. A wallet-linked farm comes back by signing in with the wallet again. */
+export async function signOut() {
+  const t = token;
+  if (t) await logout(t).catch(() => {});
+  saveSession(null);
+  pending.length = 0; token = null; confirmed = null;
+  useGame.setState({ session: null });
+  return connect();
 }
 
 /** Starts the farm over on the server. */

@@ -2,7 +2,6 @@
 // Commodity exchange, wallet & vault, and the co-op / competition previews.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import HV from '@/game/art/sprites';
-import { VAULT_FEES } from '@/game/data/economy';
 import { tradeTotal, type RefInfo } from '../../../shared/market';
 import { tradeUsed } from '@/game/sim/engine';
 import { useGame } from '@/store/game';
@@ -167,40 +166,6 @@ export function ExchangePanel({ tab = 'wheat' }: { tab?: string }) {
               : <span className="text-muted">No trades yet — be the first.</span>}
           </Card>
         </div>
-      </div>
-    </Window>
-  );
-}
-
-export function WalletPanel() {
-  const close = useGame(s => s.closePanel);
-  return (
-    <Window title="Wallet & Game Vault" icon="vault" onClose={close} width={760}
-      footer="Harvestia never asks for your seed phrase or private key. Fees are proposals and are always shown before you confirm. Vault contracts will be audited before mainnet.">
-      <div className="grid gap-3 md:grid-cols-2">
-        <Card className="flex flex-col gap-1">
-          <div className="flex items-center gap-2"><Icon name="coin" /><b className="text-lg">Wallet balance</b></div>
-          <b className="text-3xl text-gold-d">— HRV</b>
-          <p className="m-0 text-sm leading-snug">Read automatically from the $HRV token on Robinhood Chain once you connect — no need to type your holdings. Refreshes after each confirmed transaction.</p>
-        </Card>
-        <Card className="flex flex-col gap-1">
-          <div className="flex items-center gap-2"><Icon name="vault" /><b className="text-lg">Game Vault balance</b></div>
-          <b className="text-3xl text-gold-d">— HRV</b>
-          <p className="m-0 text-sm leading-snug">Tokens you deposit for spending in the game. Shop purchases, upgrades and marketplace trades settle from here.</p>
-        </Card>
-        <Card className="md:col-span-2">
-          <div className="grid gap-2 text-center sm:grid-cols-[1fr_auto_1fr_auto_1fr] sm:items-center">
-            <div><b>Your wallet</b><div className="text-xs text-muted">Robinhood Chain</div></div>
-            <div className="text-sm">deposit → <b>{VAULT_FEES.deposit * 100}% fee</b></div>
-            <div><b>Game Vault</b><div className="text-xs text-muted">in-game balance</div></div>
-            <div className="text-sm">← withdraw <b>{VAULT_FEES.withdraw * 100}% fee</b></div>
-            <div><b>Purchases</b><div className="text-xs text-muted">50% burned · 50% reward treasury</div></div>
-          </div>
-        </Card>
-        <Card className="md:col-span-2 flex flex-wrap items-center gap-2">
-          <StageButton stage={8} gold>Connect wallet</StageButton><StageButton stage={8}>Deposit</StageButton><StageButton stage={8}>Withdraw</StageButton>
-          <span className="ml-auto text-sm text-muted">Total burned: <b>0 HRV</b> · Reward treasury: <b>0 HRV</b></span>
-        </Card>
       </div>
     </Window>
   );

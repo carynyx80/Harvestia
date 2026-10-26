@@ -4,7 +4,8 @@ import { useGame, type PanelId } from '@/store/game';
 import { InventoryPanel } from './InventoryPanel';
 import { ShopPanel } from './ShopPanel';
 import { EquipmentPanel, FarmPanel, LivestockPanel, ProfilePanel } from './FarmPanels';
-import { CompetitionsPanel, CoopPanel, ExchangePanel, WalletPanel } from './MarketPanels';
+import { CompetitionsPanel, CoopPanel, ExchangePanel } from './MarketPanels';
+import { WalletPanel } from './WalletPanel';
 import { ContractsPanel, ProcessingPanel } from './EconomyPanels';
 
 const HOTKEYS: Record<string, [PanelId, string?]> = {

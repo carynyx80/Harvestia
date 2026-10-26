@@ -45,7 +45,16 @@ export interface MarketRepo {
 export interface Store {
   readonly kind: 'postgres' | 'memory';
   readonly market: MarketRepo;
-  createPlayerWithFarm(name: string, farmName: string, state: FarmState): Promise<{ player: PlayerRow; farm: FarmRow }>;
+  createPlayerWithFarm(name: string, farmName: string, state: FarmState, wallet?: string): Promise<{ player: PlayerRow; farm: FarmRow }>;
+  deleteSession(tokenHash: string): Promise<void>;
+  /** wallet sign-in */
+  createNonce(nonce: string, expiresAt: Date): Promise<void>;
+  /** marks the nonce used if it exists, is unused and unexpired; false otherwise (atomic) */
+  consumeNonce(nonce: string, now: Date): Promise<boolean>;
+  playerByWallet(wallet: string): Promise<PlayerRow | null>;
+  /** links a wallet to a player with none; false if the player already has one or the wallet is taken */
+  linkWallet(playerId: string, wallet: string): Promise<boolean>;
+  farmOf(playerId: string): Promise<{ id: string; name: string } | null>;
   createSession(playerId: string, tokenHash: string, expiresAt: Date, userAgent?: string): Promise<void>;
   sessionPlayer(tokenHash: string, now: Date): Promise<PlayerRow | null>;
   touch(playerId: string, now: Date): Promise<void>;

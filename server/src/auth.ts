@@ -1,5 +1,5 @@
 // Guest accounts and bearer-token sessions. Tokens are random 256-bit values;
-// only their SHA-256 hash is stored. Wallet sign-in links to these players in Stage 8.
+// only their SHA-256 hash is stored. Signing in with a wallet links it to the player (see wallet.ts).
 import { createHash, randomBytes } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { PlayerRow, Store } from './store/types';

@@ -4,6 +4,8 @@ import { useGame } from '@/store/game';
 import { WEATHER_LABEL, formatHour, isSnowing } from '@/game/env/environment';
 import { xpForLevel } from '@/game/sim/rules';
 import { Icon, Sprite, type IconName } from './Icon';
+import { shortAddress } from '@/lib/wallet';
+import { fmtToken, useWalletData } from '@/components/wallet/useWalletData';
 
 const drawAvatar = () => HV.farmer(2, 1, 0, false, { shirt: '#c4553b', pants: '#3f6fa8' }, 'front');
 
@@ -35,7 +37,9 @@ function WeatherPill() {
 
 export function TopBar() {
   const open = useGame(s => s.openPanel), farm = useGame(s => s.farm);
-  const farmName = useGame(s => s.session?.farmName) ?? 'Sunny Acres';
+  const farmName = useGame(s => s.session?.farmName) ?? 'Sunny Acres', linked = useGame(s => s.session?.wallet ?? null);
+  const w = useWalletData(), address = w.account.address;
+  const hrvLabel = !address ? '— HRV' : !w.hrvLaunched ? 'Not launched' : `${fmtToken(w.hrv, 0)} ${w.hrvSymbol}`;
   const level = farm?.level ?? 1, xp = farm?.xp ?? 0, next = xpForLevel(level);
   return (
     <header className="pointer-events-none absolute inset-x-2.5 top-2.5 flex items-start gap-2.5">
@@ -56,11 +60,13 @@ export function TopBar() {
         </div>
       </button>
       <div className="pointer-events-auto mt-1 ml-auto flex flex-wrap items-center justify-end gap-2">
-        <Pill icon="coin" label="Wallet" value="— HRV" title="Read from the $HRV ERC-20 contract once wallets connect (Stage 8)" onClick={() => open('wallet')} />
+        <Pill icon="coin" label="Wallet" value={hrvLabel} title={address ? 'Your $HRV balance, read from Robinhood Chain' : 'Connect a wallet to read your $HRV balance'} onClick={() => open('wallet')} />
         <Pill icon="vault" label="Game Vault" value="— HRV" title="Deposited $HRV available for in-game spending (Stage 8)" onClick={() => open('wallet')} />
         <div className="hidden md:block"><Pill icon="seed" label="Farm Coins · sim" value={(farm?.coins ?? 0).toLocaleString('en-US')} tone="green" title="Simulated currency for play until $HRV integration (Stage 8)" onClick={() => open('inventory')} /></div>
         <div className="hidden md:block"><WeatherPill /></div>
-        <button className="btn-gold" onClick={() => open('wallet')} title="Wallet details (V) — connecting arrives in Stage 8">Connect Wallet</button>
+        {address && linked === address
+          ? <button className="btn-wood flex items-center gap-1.5" onClick={() => open('wallet')} title="Signed in with this wallet (V)"><i className="inline-block size-2 border border-wood-d bg-[#4ce06a]" />{shortAddress(address)}</button>
+          : <button className="btn-gold" onClick={() => open('wallet')} title="Connect and sign in with your wallet (V)">{address ? 'Sign in' : 'Connect Wallet'}</button>}
         <button className="btn-wood grid size-10 place-items-center !p-0" title="Settings"><Icon name="gear" /></button>
       </div>
     </header>

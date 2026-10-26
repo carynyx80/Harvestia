@@ -15,6 +15,13 @@ Harvestia is a browser-based pixel-art farming game with an agricultural economy
 - **Processing:** the grain mill, dairy and food-processing plant run timed jobs (flour, cornmeal, cheese, butter, tomato sauce, soybean oil, roasted coffee, chocolate). Inputs are taken at the start, and goods are worth about 25–50% more than their ingredients.
 - **Delivery contracts:** three contracts at a time, generated deterministically by level. They pay a fixed 30% premium over the goods' base value — never a live price, so payouts stay bounded — and expire after 2 hours.
 
+### Wallet sign-in (brought forward from Stage 8)
+
+- **Connect:** any browser-extension wallet (MetaMask, Rabby, Coinbase Wallet and others) is discovered automatically (EIP-6963). On phones, buttons open Harvestia inside the MetaMask or Coinbase Wallet app. The game switches the wallet to Robinhood Chain (chain 4663; testnet 46630), adding the network if needed.
+- **Sign in:** the wallet signs an EIP-4361 "Sign-In with Ethereum" message naming this site, the chain, a single-use server nonce and a 10-minute expiry. The server checks the domain (only Harvestia's own sites), chain, statement, timing and signature (ordinary wallets locally; smart-contract wallets through the chain). Then it consumes the nonce so the signature can't be replayed. Signing costs nothing and authorises no transaction; the game never asks for a seed phrase or private key.
+- **Accounts:** the first sign-in links the wallet to the current guest farm. Signing in with the same wallet on any other device loads that farm. A new wallet with no session gets its own farm. "Sign out" ends the session.
+- **Balances:** ETH (gas) is read from Robinhood Chain and refreshed every 30 seconds. The $HRV balance is read from the token contract the same way once `NEXT_PUBLIC_HRV_TOKEN_ADDRESS` (and optionally `NEXT_PUBLIC_HRV_CHAIN_ID`) is set at launch; until then the game says the token hasn't launched. Deposits, withdrawals and the Game Vault remain Stage 8.
+
 ### Stage 6 — Backend
 
 Every farm now lives on the server:
@@ -112,7 +119,7 @@ The Stage 1 concept and art-direction sheet stay available at `/concept/index.ht
 | Database: PostgreSQL (Prisma) | Railway | `server/prisma/` |
 | Queue, cache, pub/sub: Redis (BullMQ) | Railway | `server/src/jobs.ts`, `server/src/live.ts` |
 
-API routes: `GET /health`, `GET /v1/status`, `GET /v1/world`, `POST /v1/auth/guest`, `GET /v1/me`, `GET /v1/farm`, `POST /v1/farm/actions`, `POST /v1/farm/reset`, `GET /v1/leaderboard`, `GET /v1/farms/:id`, `GET /v1/market`, `GET /v1/market/:key/history`, and the WebSocket `/v1/live`. CORS only allows the Vercel site, its preview deployments and local dev.
+API routes: `GET /health`, `GET /v1/status`, `GET /v1/world`, `POST /v1/auth/guest`, `POST /v1/auth/logout`, `POST /v1/wallet/nonce`, `POST /v1/wallet/verify`, `GET /v1/me`, `GET /v1/farm`, `POST /v1/farm/actions`, `POST /v1/farm/reset`, `GET /v1/leaderboard`, `GET /v1/farms/:id`, `GET /v1/market`, `GET /v1/market/:key/history`, and the WebSocket `/v1/live`. CORS only allows the Vercel site, its preview deployments and local dev.
 
 ## Develop
 

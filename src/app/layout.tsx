@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Pixelify_Sans } from 'next/font/google';
 import './globals.css';
+import { Web3Provider } from '@/components/Web3Provider';
 
 const pixel = Pixelify_Sans({ subsets: ['latin'], weight: ['400', '500', '600', '700'], variable: '--font-pixel' });
 
@@ -17,7 +18,7 @@ export const viewport: Viewport = { themeColor: '#0b0e13', width: 'device-width'
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={pixel.variable}>
-      <body>{children}</body>
+      <body><Web3Provider>{children}</Web3Provider></body>
     </html>
   );
 }

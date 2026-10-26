@@ -16,9 +16,9 @@ export class PrismaStore implements Store {
   readonly market: MarketRepo;
   constructor(private db = new PrismaClient()) { this.market = new PrismaMarket(db); }
 
-  async createPlayerWithFarm(name: string, farmName: string, state: FarmState) {
+  async createPlayerWithFarm(name: string, farmName: string, state: FarmState, wallet?: string) {
     return this.db.$transaction(async tx => {
-      const p = await tx.player.create({ data: { name } });
+      const p = await tx.player.create({ data: { name, wallet } });
       const f = await tx.farm.create({ data: { playerId: p.id, name: farmName, state: json(state), ...headline(state) } });
       await tx.inventoryItem.createMany({ data: inventoryRows(f.id, state) });
       return { player: { id: p.id, name: p.name, wallet: p.wallet, createdAt: p.createdAt } as PlayerRow, farm: row(f) };
@@ -35,6 +35,25 @@ export class PrismaStore implements Store {
     const p = s.player;
     return { id: p.id, name: p.name, wallet: p.wallet, createdAt: p.createdAt };
   }
+
+  async deleteSession(tokenHash: string) { await this.db.session.deleteMany({ where: { tokenHash } }); }
+  async createNonce(nonce: string, expiresAt: Date) { await this.db.walletNonce.create({ data: { nonce, expiresAt } }); }
+  async consumeNonce(nonce: string, now: Date) {
+    // one conditional update: only one request can ever use a nonce
+    const r = await this.db.walletNonce.updateMany({ where: { nonce, usedAt: null, expiresAt: { gt: now } }, data: { usedAt: now } });
+    return r.count === 1;
+  }
+  async playerByWallet(wallet: string) {
+    const p = await this.db.player.findUnique({ where: { wallet } });
+    return p ? { id: p.id, name: p.name, wallet: p.wallet, createdAt: p.createdAt } : null;
+  }
+  async linkWallet(playerId: string, wallet: string) {
+    try {
+      const r = await this.db.player.updateMany({ where: { id: playerId, wallet: null }, data: { wallet } });
+      return r.count === 1;
+    } catch { return false; } // unique constraint: wallet already linked elsewhere
+  }
+  async farmOf(playerId: string) { return this.db.farm.findUnique({ where: { playerId }, select: { id: true, name: true } }); }
 
   async touch(playerId: string, now: Date) {
     await this.db.player.update({ where: { id: playerId }, data: { lastSeenAt: now } });
@@ -74,6 +93,7 @@ export class PrismaStore implements Store {
 
   async cleanup(now: Date, keepLogsDays: number) {
     const sessions = await this.db.session.deleteMany({ where: { expiresAt: { lte: now } } });
+    await this.db.walletNonce.deleteMany({ where: { expiresAt: { lte: now } } });
     const logs = await this.db.actionLog.deleteMany({ where: { createdAt: { lt: new Date(now.getTime() - keepLogsDays * 86_400_000) } } });
     return { sessions: sessions.count, logs: logs.count };
   }

@@ -156,3 +156,13 @@ model Trade {
   @@index([commodity, at])
   @@index([farmId, at])
 }
+
+/** Single-use sign-in challenges for wallet authentication (replay protection). */
+model WalletNonce {
+  nonce     String    @id
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  @@index([expiresAt])
+}

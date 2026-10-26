@@ -28,7 +28,7 @@ export interface Toast { id: number; text: string; tone: 'good' | 'bad' | 'info'
 export interface Popup { id: number; x: number; y: number; text: string; tone: 'good' | 'gold' | 'blue' }
 
 export type Connection = 'connecting' | 'online' | 'offline';
-export interface PlayerSession { playerId: string; playerName: string; farmId: string; farmName: string }
+export interface PlayerSession { playerId: string; playerName: string; farmId: string; farmName: string; wallet: string | null }
 /** Set by the sync module: sends an action to the server after it was applied locally. */
 let sendAction: ((a: FarmAction) => void) | null = null;
 export const setActionSender = (fn: typeof sendAction) => { sendAction = fn; };

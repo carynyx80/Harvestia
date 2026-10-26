@@ -2,7 +2,7 @@
   "name": "harvestia",
   "version": "0.2.0",
   "private": true,
-  "description": "Harvestia \u2014 a pixel-art Web3 farming economy.",
+  "description": "Harvestia — a pixel-art Web3 farming economy.",
   "engines": {
     "node": ">=20"
   },
@@ -16,10 +16,13 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@tanstack/react-query": "5.104.2",
     "next": "15.5.28",
     "phaser": "3.90.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
+    "viem": "2.57.4",
+    "wagmi": "2.19.5",
     "zustand": "5.0.16"
   },
   "devDependencies": {

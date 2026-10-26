@@ -10,7 +10,7 @@ export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'https://harvestia-ap
 export interface ApiStatus { service: string; stage: number; environment: string; commit: string; time: string; online?: number; database?: string }
 export interface FarmResponse { farmId: string; name: string; state: FarmState; lastSeq: number; serverTime: number; world: WorldState }
 export interface ActionResponse { ok: boolean; state?: FarmState; events?: FarmEvent[]; error?: string; lastSeq?: number; duplicate?: boolean; serverTime: number }
-export interface Session { token: string; player: { id: string; name: string }; farm: { id: string; name: string } }
+export interface Session { token: string; player: { id: string; name: string; wallet?: string | null }; farm: { id: string; name: string } }
 export interface LeaderRow { farmId: string; name: string; level: number; xp: number; coins: number }
 
 const TOKEN_KEY = 'harvestia.session.v1';
@@ -42,6 +42,11 @@ export const getFarm = (token: string) => call<FarmResponse>('/v1/farm', { token
 export const postAction = (token: string, seq: number, action: FarmAction) => call<ActionResponse>('/v1/farm/actions', { method: 'POST', token, body: JSON.stringify({ seq, action }) });
 export const resetFarm = (token: string) => call<{ ok: boolean; state: FarmState; lastSeq: number; serverTime: number }>('/v1/farm/reset', { method: 'POST', token, body: '{}' });
 export const getLeaderboard = () => call<{ updatedAt: number; rows: LeaderRow[] }>('/v1/leaderboard');
+export const getWalletNonce = () => call<{ nonce: string; issuedAt: number; expiresAt: number; chains: number[] }>('/v1/wallet/nonce', { method: 'POST', body: '{}' });
+/** Sends the signed sign-in message; errors (bad signature, expired, wrong site) come back as ApiError with the server's reason. */
+export const verifyWallet = (message: string, signature: string, token?: string) =>
+  call<Session & { ok: boolean; outcome: 'linked' | 'signed-in' | 'created'; serverTime: number }>('/v1/wallet/verify', { method: 'POST', token, body: JSON.stringify({ message, signature }), timeoutMs: 20_000 });
+export const logout = (token: string) => call<{ ok: boolean }>('/v1/auth/logout', { method: 'POST', token, body: '{}' });
 export const getMarket = () => call<MarketSnapshot>('/v1/market');
 export interface MarketHistory {
   key: string;

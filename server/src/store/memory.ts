@@ -13,8 +13,10 @@ export class MemoryStore implements Store {
   readonly logs: { farmId: string; at: Date; seq: number; type: string; ok: boolean; error?: string }[] = [];
   readonly flags: { playerId: string; reason: string; detail: unknown }[] = [];
 
-  async createPlayerWithFarm(name: string, farmName: string, state: FarmState) {
-    const player: PlayerRow = { id: randomUUID(), name, wallet: null, createdAt: new Date() };
+  private nonces = new Map<string, { expiresAt: Date; usedAt?: Date }>();
+
+  async createPlayerWithFarm(name: string, farmName: string, state: FarmState, wallet?: string) {
+    const player: PlayerRow = { id: randomUUID(), name, wallet: wallet ?? null, createdAt: new Date() };
     const farm: FarmRow = { id: randomUUID(), playerId: player.id, name: farmName, state, lastSeq: 0 };
     this.players.set(player.id, player); this.farms.set(player.id, farm);
     return { player, farm: structuredClone(farm) };
@@ -25,6 +27,20 @@ export class MemoryStore implements Store {
     return s && s.expiresAt > now ? this.players.get(s.playerId) ?? null : null;
   }
   async touch() { /* nothing to record in memory */ }
+  async deleteSession(tokenHash: string) { this.sessions.delete(tokenHash); }
+  async createNonce(nonce: string, expiresAt: Date) { this.nonces.set(nonce, { expiresAt }); }
+  async consumeNonce(nonce: string, now: Date) {
+    const n = this.nonces.get(nonce);
+    if (!n || n.usedAt || n.expiresAt <= now) return false;
+    n.usedAt = now; return true;
+  }
+  async playerByWallet(wallet: string) { return [...this.players.values()].find(p => p.wallet === wallet) ?? null; }
+  async linkWallet(playerId: string, wallet: string) {
+    const p = this.players.get(playerId);
+    if (!p || p.wallet || [...this.players.values()].some(x => x.wallet === wallet)) return false;
+    p.wallet = wallet; return true;
+  }
+  async farmOf(playerId: string) { const f = this.farms.get(playerId); return f ? { id: f.id, name: f.name } : null; }
 
   async withFarm<T>(playerId: string, fn: (farm: FarmRow) => FarmTxResult<T> | Promise<FarmTxResult<T>>): Promise<T> {
     // serialise work per player, like a row lock

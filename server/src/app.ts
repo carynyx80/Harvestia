@@ -5,7 +5,9 @@ import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import websocket from '@fastify/websocket';
 import { config } from './config';
-import { cleanName, hashToken, newToken, randomFarmName, randomPlayerName, requirePlayer } from './auth';
+import { bearer, cleanName, hashToken, newToken, randomFarmName, randomPlayerName, requirePlayer } from './auth';
+import { newNonce, verifySignIn } from './wallet';
+import { CHAINS, NONCE_TTL_MS } from '../../shared/chains';
 import { SpeedGuard, readFarm, runAction } from './farm';
 import { Jobs } from './jobs';
 import { LiveHub } from './live';
@@ -73,7 +75,7 @@ export async function buildApp(opts: AppOptions = {}) {
     database: store.kind,
     queue: jobs.mode,
     online: live.online,
-    features: { accounts: true, farmState: true, liveChannel: true, commodityFeeds: !!provider, exchange: true, processing: true, contracts: true, wallet: false },
+    features: { accounts: true, farmState: true, liveChannel: true, commodityFeeds: !!provider, exchange: true, processing: true, contracts: true, walletSignIn: true, vault: false },
     market: { provider: provider?.name ?? null, publishedAt: market.snapshot?.updatedAt ?? null, feeds: market.snapshot?.commodities.filter(c => c.ref).map(c => ({ key: c.key, status: c.ref!.status, period: c.ref!.period })) ?? [] },
   }));
 
@@ -103,6 +105,53 @@ export async function buildApp(opts: AppOptions = {}) {
     const token = newToken();
     await store.createSession(player.id, hashToken(token), new Date(now + config.sessionDays * 86_400_000), req.headers['user-agent']);
     return { token, player: { id: player.id, name: player.name }, farm: { id: farm.id, name: farm.name }, serverTime: now };
+  });
+
+  /** Starts a session for a player and returns what the client needs. */
+  const startSession = async (playerId: string, playerName: string, wallet: string | null, userAgent?: string) => {
+    const token = newToken(), now = Date.now();
+    await store.createSession(playerId, hashToken(token), new Date(now + config.sessionDays * 86_400_000), userAgent);
+    const farm = await store.farmOf(playerId);
+    return { token, player: { id: playerId, name: playerName, wallet }, farm: farm!, serverTime: now };
+  };
+  const signInHost = (host: string) => [...config.corsOrigins.map(o => { try { return new URL(o).host; } catch { return ''; } })].includes(host) || config.corsPreviewPattern.test(`https://${host}`);
+
+  // ---------------------------------------------------------------- wallet sign-in (EIP-4361)
+  /** A single-use challenge for the wallet to sign. */
+  app.post('/v1/wallet/nonce', { config: { rateLimit: { max: 30, timeWindow: '1 minute', keyGenerator: req => `nonce:${req.ip}` } } }, async () => {
+    const nonce = newNonce(), now = Date.now();
+    await store.createNonce(nonce, new Date(now + NONCE_TTL_MS));
+    return { nonce, issuedAt: now, expiresAt: now + NONCE_TTL_MS, chains: CHAINS.map(c => c.id) };
+  });
+
+  /**
+   * Verifies a signed sign-in message. If the wallet already belongs to a farm, that farm is signed in
+   * (so the same wallet restores the same farm on any device); otherwise it is linked to the current
+   * guest farm, or a new farm is created for it.
+   */
+  app.post('/v1/wallet/verify', { config: { rateLimit: { max: 20, timeWindow: '1 minute', keyGenerator: req => `verify:${req.ip}` } } }, async (req, reply) => {
+    const body = (req.body ?? {}) as Record<string, unknown>, now = Date.now();
+    const check = await verifySignIn(body.message, body.signature, signInHost, now);
+    if (!check.ok) return reply.code(400).send({ ok: false, error: check.error });
+    if (!(await store.consumeNonce(check.nonce!, new Date(now)))) return reply.code(400).send({ ok: false, error: 'This sign-in request was already used or has expired — try again' });
+    const wallet = check.address, ua = req.headers['user-agent'];
+
+    const owner = await store.playerByWallet(wallet);
+    if (owner) return { ok: true, outcome: 'signed-in', ...await startSession(owner.id, owner.name, wallet, ua) };
+
+    const token = bearer(req);
+    const current = token && token.length >= 20 && token.length <= 100 ? await store.sessionPlayer(hashToken(token), new Date(now)) : null;
+    if (current && !current.wallet && await store.linkWallet(current.id, wallet)) {
+      return { ok: true, outcome: 'linked', ...await startSession(current.id, current.name, wallet, ua) };
+    }
+    const { player } = await store.createPlayerWithFarm(randomPlayerName(), randomFarmName(), initialState(now), wallet);
+    return { ok: true, outcome: 'created', ...await startSession(player.id, player.name, wallet, ua) };
+  });
+
+  /** Ends this session (the farm and any linked wallet stay; sign in again with the wallet to return). */
+  app.post('/v1/auth/logout', { preHandler: auth }, async req => {
+    await store.deleteSession(hashToken(bearer(req)!));
+    return { ok: true };
   });
 
   app.get('/v1/me', { preHandler: auth }, async req => {
