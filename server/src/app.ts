@@ -264,7 +264,7 @@ export async function buildApp(opts: AppOptions = {}) {
 
   app.post('/v1/farm/actions', { preHandler: auth }, async (req, reply) => {
     const now = Date.now(), playerId = req.player!.id;
-    if (now < config.opensAt) return reply.code(403).send({ ok: false, error: 'Doors open at 4:00 PM UTC on October 26', opensAt: config.opensAt, serverTime: now });
+    if (now < config.opensAt) return reply.code(403).send({ ok: false, error: `Doors open ${new Date(config.opensAt).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'UTC' })} UTC`, opensAt: config.opensAt, serverTime: now });
     if (speed.tooFast(playerId, now)) return reply.code(429).send({ ok: false, error: 'Too many actions at once — slow down a little' });
     const body = (req.body ?? {}) as Record<string, unknown>;
     const out = await runAction(store, playerId, body.seq, body.action, now, market);
