@@ -41,10 +41,35 @@ export interface MarketRepo {
   volumes(since: Date): Promise<Record<string, number>>;
 }
 
+export interface VaultEventRow { chainId: number; txHash: string; logIndex: number; block: bigint; at: Date; kind: string; player: string | null; amount: string; extra: Record<string, string> }
+export type PurchaseStatus = 'quoted' | 'submitted' | 'settled' | 'failed' | 'compensated';
+export interface PurchaseRow {
+  id: string; playerId: string; wallet: string; item: string; qty: number; amountWei: string; usd: number; usdPerHrv: number; priceSource: string;
+  deadline: Date; status: PurchaseStatus; txHash: string | null; error: string | null; createdAt: Date; settledAt: Date | null;
+}
+
+/** Persistence for the on-chain Game Vault: indexed events, $HRV purchases and earned rewards. */
+export interface ChainRepo {
+  cursor(name: string): Promise<bigint | null>;
+  setCursor(name: string, block: bigint): Promise<void>;
+  /** inserts, skipping events already stored */
+  saveEvents(rows: VaultEventRow[]): Promise<number>;
+  /** newest first */
+  events(filter: { player?: string; kinds?: string[]; limit: number }): Promise<VaultEventRow[]>;
+  createPurchase(row: PurchaseRow): Promise<void>;
+  purchase(id: string): Promise<PurchaseRow | null>;
+  /** updates only if the purchase is currently in `from` (atomic status transitions); false otherwise */
+  movePurchase(id: string, from: PurchaseStatus, patch: Partial<PurchaseRow> & { status: PurchaseStatus }): Promise<boolean>;
+  purchases(playerId: string, limit: number): Promise<PurchaseRow[]>;
+  addReward(wallet: string, playerId: string, amountWei: bigint, reason: string): Promise<void>;
+  rewardTotal(wallet: string, since?: Date): Promise<bigint>;
+}
+
 /** Persistence for players, sessions and farms. Prisma in production, memory in tests. */
 export interface Store {
   readonly kind: 'postgres' | 'memory';
   readonly market: MarketRepo;
+  readonly chain: ChainRepo;
   createPlayerWithFarm(name: string, farmName: string, state: FarmState, wallet?: string): Promise<{ player: PlayerRow; farm: FarmRow }>;
   deleteSession(tokenHash: string): Promise<void>;
   /** wallet sign-in */

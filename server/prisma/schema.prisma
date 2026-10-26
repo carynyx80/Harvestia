@@ -166,3 +166,60 @@ model WalletNonce {
 
   @@index([expiresAt])
 }
+
+/** Last block the vault indexer processed. */
+model ChainCursor {
+  name  String @id
+  block BigInt
+}
+
+/** Every Game Vault event, indexed from the chain (amounts in wei as decimal strings). */
+model VaultEvent {
+  id       BigInt   @id @default(autoincrement())
+  chainId  Int
+  txHash   String
+  logIndex Int
+  block    BigInt
+  at       DateTime
+  kind     String
+  player   String?
+  amount   String
+  extra    Json
+
+  @@unique([txHash, logIndex])
+  @@index([player, block])
+  @@index([kind, block])
+}
+
+/** A $HRV purchase from quote to on-chain settlement. */
+model HrvPurchase {
+  id         String    @id
+  playerId   String
+  wallet     String
+  item       String
+  qty        Int
+  amountWei  String
+  usd        Float
+  usdPerHrv  Float
+  priceSource String
+  deadline   DateTime
+  status     String
+  txHash     String?
+  error      String?
+  createdAt  DateTime  @default(now())
+  settledAt  DateTime?
+
+  @@index([playerId, createdAt])
+}
+
+/** $HRV rewards earned through gameplay; the vault pays out the unclaimed part on request. */
+model HrvReward {
+  id        BigInt   @id @default(autoincrement())
+  wallet    String
+  playerId  String
+  amountWei String
+  reason    String
+  createdAt DateTime @default(now())
+
+  @@index([wallet, createdAt])
+}

@@ -123,12 +123,12 @@ export function buildLayout(terrain: TerrainResult): WorldLayout {
   // ---- Marketplace
   bld('exchange', 704, 84, 96, 96, () => HV.exchange(704, 84), { name: 'Commodity Exchange', zone: 'Marketplace', play: 'Buy and sell crops at server prices that follow real monthly market references, within bounds.', stage: 7 });
   bld('vault', 814, 108, 60, 68, () => HV.vault(814, 108), { name: 'HRV Game Vault', zone: 'Marketplace', play: 'Deposit and withdraw $HRV, view burns and treasury. Wallet-signed.', stage: 8 });
-  bld('storage', 892, 112, 58, 54, () => HV.warehouse(892, 112, ['#9c6436', '#6e4527', '#c48d52']), { name: 'Market Storage', zone: 'Marketplace', play: 'Escrow storage for player marketplace listings.', stage: 8 });
+  bld('storage', 892, 112, 58, 54, () => HV.warehouse(892, 112, ['#9c6436', '#6e4527', '#c48d52']), { name: 'Market Storage', zone: 'Marketplace', play: 'Escrow storage for player marketplace listings.', stage: 10 });
   bld('board', 962, 146, 24, 22, () => HV.board(962, 146), { name: 'Delivery Contracts', zone: 'Marketplace', play: 'Deliver produce and goods within 2 hours for a fixed coin premium and XP.', stage: 7 });
   const stalls: [number, string, string[]][] = [[706, '#c4553b', ['#e0402f', '#f2c94c', '#8fd45c', '#3f6fa8']], [738, '#3f6fa8', ['#f4efe2', '#f2c94c', '#e9e0c8', '#4f9a3c']], [770, '#e8a33a', ['#c22f2f', '#6b4226', '#d9822b', '#7b5cc4']], [802, '#4e8a3c', ['#f2c94c', '#e0402f', '#c9a6e8', '#c4553b']],
     [874, '#7b5cc4', ['#d9822b', '#6b4226', '#f2c94c', '#2f6f2e']], [906, '#c4553b', ['#8fd45c', '#e0402f', '#f4efe2', '#e8a33a']], [938, '#3f8a8c', ['#e9e0c8', '#f2c94c', '#c22f2f', '#3f6fa8']]];
   stalls.forEach(([sx, c, gds]) => bld('stall' + sx, sx, 232, 26, 24, () => HV.stall(sx, 232, c, gds)));
-  spot({ id: 'market', x: 702, y: 228, w: 130, h: 30, name: 'Produce Market', zone: 'Marketplace', play: 'Player-to-player listings settled in $HRV, with transparent fees.', stage: 8 });
+  spot({ id: 'market', x: 702, y: 228, w: 130, h: 30, name: 'Produce Market', zone: 'Marketplace', play: 'Player-to-player listings settled in $HRV, with transparent fees.', stage: 10 });
   spot({ id: 'trading', x: 870, y: 228, w: 96, h: 30, name: 'Trading Stalls', zone: 'Marketplace', play: 'Buy seeds, feed and tools. Every item ≤ $15 reference price.', stage: 4 });
   for (const lx of [700, 1004]) add(214, () => HV.lamp(lx, 214));
   for (const lx of [700, 868, 1004]) add(272, () => HV.lamp(lx, 272));

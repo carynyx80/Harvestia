@@ -27,7 +27,7 @@ export function ProfilePanel() {
   // early achievements follow live stats; the rest unlock in later stages
   const got = (name: string) => name === 'First Harvest' ? (farm.stats.harvested ?? 0) > 0 : name === 'Mechanised' ? !!farm.machines['mach-tractor'] : name === 'Rancher' ? (['chicken', 'sheep', 'pig', 'cow'] as AnimalType[]).every(k => farm.animals.some(a => a.kind === k)) : name === 'Green Thumb' ? (farm.stats.planted ?? 0) >= 50 : false;
   return (
-    <Window title="Farmer profile" icon="home" onClose={close} width={760} footer="Your farm is saved on the Harvestia server under a guest account kept in this browser. Wallet sign-in arrives in Stage 8 and will prove ownership by signing a one-time message — never by a seed phrase or private key.">
+    <Window title="Farmer profile" icon="home" onClose={close} width={760} footer="Your farm is saved on the Harvestia server under a guest account kept in this browser. Sign in with your wallet (one signed message — never a seed phrase or private key) to keep this farm on any device.">
       <div className="grid gap-3 md:grid-cols-[220px_1fr]">
         <Card className="flex flex-col items-center gap-2 text-center">
           <div className="grid h-28 w-full place-items-center border-2 border-wood bg-[#9fd3e6] shadow-[inset_0_-24px_0_#5fb44b]"><SpriteThumb draw={drawAvatar} box={96} maxScale={6} /></div>

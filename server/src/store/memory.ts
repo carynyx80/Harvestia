@@ -1,11 +1,12 @@
 // In-memory store for tests and local development without PostgreSQL.
 import { randomUUID } from 'node:crypto';
-import type { BookRow, FarmRow, FarmTxResult, FeedRow, LeaderRow, MarketRepo, PlayerRow, PriceRow, RefRow, Store, TradeRow } from './types';
+import type { BookRow, ChainRepo, FarmRow, FarmTxResult, FeedRow, LeaderRow, MarketRepo, PlayerRow, PriceRow, PurchaseRow, PurchaseStatus, RefRow, Store, TradeRow, VaultEventRow } from './types';
 import type { FarmState } from '../../../shared/sim/state';
 
 export class MemoryStore implements Store {
   readonly kind = 'memory' as const;
   readonly market = new MemoryMarket();
+  readonly chain = new MemoryChain();
   private players = new Map<string, PlayerRow>();
   private sessions = new Map<string, { playerId: string; expiresAt: Date }>();
   private farms = new Map<string, FarmRow>(); // by playerId
@@ -115,4 +116,34 @@ export class MemoryMarket implements MarketRepo {
     for (const t of this.tradeRows) if (t.at >= since) v[t.commodity] = (v[t.commodity] ?? 0) + t.qty;
     return v;
   }
+}
+
+/** In-memory Game Vault persistence (tests and local development). */
+export class MemoryChain implements ChainRepo {
+  readonly cursors = new Map<string, bigint>();
+  readonly eventRows: VaultEventRow[] = [];
+  readonly purchaseRows = new Map<string, PurchaseRow>();
+  readonly rewardRows: { wallet: string; playerId: string; amountWei: bigint; reason: string; at: Date }[] = [];
+
+  async cursor(name: string) { return this.cursors.get(name) ?? null; }
+  async setCursor(name: string, block: bigint) { this.cursors.set(name, block); }
+  async saveEvents(rows: VaultEventRow[]) {
+    let n = 0;
+    for (const r of rows) if (!this.eventRows.some(e => e.txHash === r.txHash && e.logIndex === r.logIndex)) { this.eventRows.push(r); n++; }
+    return n;
+  }
+  async events(f: { player?: string; kinds?: string[]; limit: number }) {
+    return this.eventRows.filter(e => (!f.player || e.player === f.player) && (!f.kinds || f.kinds.includes(e.kind)))
+      .sort((a, b) => Number(b.block - a.block) || b.logIndex - a.logIndex).slice(0, f.limit);
+  }
+  async createPurchase(row: PurchaseRow) { this.purchaseRows.set(row.id, { ...row }); }
+  async purchase(id: string) { const p = this.purchaseRows.get(id); return p ? { ...p } : null; }
+  async movePurchase(id: string, from: PurchaseStatus, patch: Partial<PurchaseRow> & { status: PurchaseStatus }) {
+    const p = this.purchaseRows.get(id);
+    if (!p || p.status !== from) return false;
+    Object.assign(p, patch); return true;
+  }
+  async purchases(playerId: string, limit: number) { return [...this.purchaseRows.values()].filter(p => p.playerId === playerId).sort((a, b) => +b.createdAt - +a.createdAt).slice(0, limit); }
+  async addReward(wallet: string, playerId: string, amountWei: bigint, reason: string) { this.rewardRows.push({ wallet, playerId, amountWei, reason, at: new Date() }); }
+  async rewardTotal(wallet: string, since?: Date) { return this.rewardRows.filter(r => r.wallet === wallet && (!since || r.at >= since)).reduce((a, r) => a + r.amountWei, 0n); }
 }

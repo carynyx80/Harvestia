@@ -1,7 +1,7 @@
 // PostgreSQL store via Prisma. Farm writes take a row lock (SELECT … FOR UPDATE)
 // inside a transaction, so concurrent requests for one farm apply in order.
 import { Prisma, PrismaClient } from '@prisma/client';
-import type { FarmRow, FarmTxResult, FeedRow, LeaderRow, MarketRepo, PlayerRow, PriceRow, RefRow, Store, TradeRow } from './types';
+import type { ChainRepo, FarmRow, FarmTxResult, FeedRow, LeaderRow, MarketRepo, PlayerRow, PriceRow, PurchaseRow, PurchaseStatus, RefRow, Store, TradeRow, VaultEventRow } from './types';
 import type { FarmState } from '../../../shared/sim/state';
 
 const json = (v: unknown) => v as Prisma.InputJsonValue;
@@ -14,7 +14,8 @@ const inventoryRows = (farmId: string, s: FarmState) =>
 export class PrismaStore implements Store {
   readonly kind = 'postgres' as const;
   readonly market: MarketRepo;
-  constructor(private db = new PrismaClient()) { this.market = new PrismaMarket(db); }
+  readonly chain: ChainRepo;
+  constructor(private db = new PrismaClient()) { this.market = new PrismaMarket(db); this.chain = new PrismaChain(db); }
 
   async createPlayerWithFarm(name: string, farmName: string, state: FarmState, wallet?: string) {
     return this.db.$transaction(async tx => {
@@ -152,3 +153,31 @@ export class PrismaMarket implements MarketRepo {
 }
 const priceRow = (r: { commodity: string; at: Date; mid: number; target: number; parts: Prisma.JsonValue }): PriceRow =>
   ({ commodity: r.commodity, at: r.at, mid: r.mid, target: r.target, parts: r.parts as unknown as PriceRow['parts'] });
+
+/** Game Vault persistence in PostgreSQL. */
+export class PrismaChain implements ChainRepo {
+  constructor(private db: PrismaClient) {}
+  async cursor(name: string) { return (await this.db.chainCursor.findUnique({ where: { name } }))?.block ?? null; }
+  async setCursor(name: string, block: bigint) { await this.db.chainCursor.upsert({ where: { name }, create: { name, block }, update: { block } }); }
+  async saveEvents(rows: VaultEventRow[]) {
+    if (!rows.length) return 0;
+    const r = await this.db.vaultEvent.createMany({ data: rows.map(e => ({ ...e, extra: json(e.extra) })), skipDuplicates: true });
+    return r.count;
+  }
+  async events(f: { player?: string; kinds?: string[]; limit: number }) {
+    const rows = await this.db.vaultEvent.findMany({ where: { ...(f.player ? { player: f.player } : {}), ...(f.kinds ? { kind: { in: f.kinds } } : {}) }, orderBy: [{ block: 'desc' }, { logIndex: 'desc' }], take: f.limit });
+    return rows.map(e => ({ chainId: e.chainId, txHash: e.txHash, logIndex: e.logIndex, block: e.block, at: e.at, kind: e.kind, player: e.player, amount: e.amount, extra: e.extra as Record<string, string> }));
+  }
+  async createPurchase(row: PurchaseRow) { await this.db.hrvPurchase.create({ data: row }); }
+  async purchase(id: string) { return (await this.db.hrvPurchase.findUnique({ where: { id } })) as PurchaseRow | null; }
+  async movePurchase(id: string, from: PurchaseStatus, patch: Partial<PurchaseRow> & { status: PurchaseStatus }) {
+    const r = await this.db.hrvPurchase.updateMany({ where: { id, status: from }, data: patch });
+    return r.count === 1;
+  }
+  async purchases(playerId: string, limit: number) { return (await this.db.hrvPurchase.findMany({ where: { playerId }, orderBy: { createdAt: 'desc' }, take: limit })) as PurchaseRow[]; }
+  async addReward(wallet: string, playerId: string, amountWei: bigint, reason: string) { await this.db.hrvReward.create({ data: { wallet, playerId, amountWei: amountWei.toString(), reason } }); }
+  async rewardTotal(wallet: string, since?: Date) {
+    const rows = await this.db.hrvReward.findMany({ where: { wallet, ...(since ? { createdAt: { gte: since } } : {}) }, select: { amountWei: true } });
+    return rows.reduce((a, r) => a + BigInt(r.amountWei), 0n);
+  }
+}

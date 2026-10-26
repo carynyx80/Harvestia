@@ -50,7 +50,7 @@ export function ViewControls() {
   return (
     <div className="panel pointer-events-auto absolute right-2.5 bottom-2.5 hidden w-[262px] px-3 py-2.5 lg:block">
       <div className="flex items-center justify-between">
-        <b className="text-base">Stage 7 · Commodity economy</b>
+        <b className="text-base">Stage 8 · Blockchain</b>
         <a href="/concept/index.html" className="text-xs text-muted underline">Stage 1 art</a>
       </div>
       <div className="mt-1 flex items-center justify-between gap-2 text-xs">

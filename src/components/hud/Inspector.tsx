@@ -121,7 +121,7 @@ export function Inspector() {
       <p className="my-1.5 leading-snug">{text}</p>
       <div className="flex flex-wrap items-center gap-1.5">
         {actions}
-        {stage > 7 && <span className="inline-block border-2 border-[#2a5f61] bg-teal px-1.5 py-0.5 text-xs text-white">Playable from Stage {stage}</span>}
+        {stage > 8 && <span className="inline-block border-2 border-[#2a5f61] bg-teal px-1.5 py-0.5 text-xs text-white">Playable from Stage {stage}</span>}
       </div>
     </section>
   );

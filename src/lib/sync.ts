@@ -10,6 +10,7 @@ import type { FarmState } from '../../shared/sim/state';
 import { ApiError, getFarm, getMarket, loadSession, logout, openLive, postAction, resetFarm, saveSession, signInGuest, type Session } from './api';
 import { loadState, saveState } from '@/game/sim/save';
 import { pushEvents, setActionSender, useGame } from '@/store/game';
+import { queryClient } from './queryClient';
 
 let token: string | null = null;
 let seq = 0;
@@ -92,6 +93,7 @@ async function connect(given?: Session): Promise<boolean> {
       if (m.type === 'hello') useGame.setState({ live: { online: m.online ?? 0, feed: (m.recent ?? []).map(r => ({ text: r.text, at: r.at })) } });
       else if (m.type === 'presence') useGame.setState({ live: { ...st.live, online: m.online ?? 0 } });
       else if (m.type === 'market') void refreshMarket();
+      else if (m.type === 'vault') void queryClient.invalidateQueries({ queryKey: ['vault'] });
       else if (m.type === 'activity' && m.text) {
         useGame.setState({ live: { ...st.live, feed: [{ text: m.text, at: m.at ?? Date.now() }, ...st.live.feed].slice(0, 12) } });
         if (!m.text.startsWith(st.session?.farmName ?? '\u0000')) pushEvents([{ kind: 'toast', text: m.text, tone: 'info' }]);
@@ -133,6 +135,13 @@ export function startSync() {
   const cacheId = setInterval(() => { const f = useGame.getState().farm; if (f) saveState(f); }, 10_000);
   const marketId = setInterval(() => void refreshMarket(), 60_000);
   return () => { clearInterval(tickId); clearInterval(syncId); clearInterval(cacheId); clearInterval(marketId); live?.close(); setActionSender(null); };
+}
+
+/** Adopts a farm state the server changed outside the action queue (e.g. an item paid for in $HRV). */
+export function applyServerState(state: FarmState, events: Parameters<typeof pushEvents>[0] = []) {
+  confirmed = state;
+  rebase();
+  pushEvents(events);
 }
 
 /** The current session token (for wallet sign-in, which links the wallet to this guest farm). */

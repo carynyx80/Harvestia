@@ -15,15 +15,21 @@ import { MemoryStore } from './store/memory';
 import { MarketService } from './market/service';
 import { imfViaFred, type ReferenceProvider } from './market/providers';
 import { COMMODITY_BY_KEY } from '../../shared/market';
+import { VaultError, VaultService, vaultConfigFromEnv, type VaultConfig } from './chain/vault';
+import { SPEND_TYPES } from '../../shared/vault';
+import { CATALOG_BY_ID } from '../../shared/catalog';
+import { buy, tick } from '../../shared/sim/engine';
+import { conditionsAt } from './farm';
+import { formatUnits, getAddress, type Address, type Hex } from 'viem';
 import type { Store } from './store/types';
 import { initialState } from '../../shared/sim/state';
 import { worldAt } from '../../shared/world';
 
-export const GAME_STAGE = 7;
+export const GAME_STAGE = 8;
 
-declare module 'fastify' { interface FastifyInstance { market: MarketService } }
+declare module 'fastify' { interface FastifyInstance { market: MarketService; vault: VaultService } }
 
-export interface AppOptions { store?: Store; redisUrl?: string; runJobs?: boolean; provider?: ReferenceProvider | null }
+export interface AppOptions { store?: Store; redisUrl?: string; runJobs?: boolean; provider?: ReferenceProvider | null; vault?: VaultConfig | null }
 
 async function defaultStore(): Promise<Store> {
   if (config.databaseUrl) { const { PrismaStore } = await import('./store/prisma'); return new PrismaStore(); }
@@ -47,6 +53,16 @@ export async function buildApp(opts: AppOptions = {}) {
   const speed = new SpeedGuard(15, (playerId, detail) => { void store.flag(playerId, 'too-fast', detail); app.log.warn({ playerId, detail }, 'flagged: too fast'); });
   const auth = requirePlayer(store);
   app.decorate('market', market);
+  const vault = new VaultService('vault' in opts ? opts.vault! : vaultConfigFromEnv(), store.chain, (msg, extra) => app.log.warn({ extra }, msg));
+  app.decorate('vault', vault);
+  if ((opts.runJobs ?? config.worker) && vault.enabled) {
+    let running = false;
+    const t = setInterval(() => {
+      if (running) return; running = true;
+      vault.index().then(n => { if (n) live.vault(); }, e => app.log.warn({ err: (e as Error).message }, 'vault index failed')).finally(() => { running = false; });
+    }, 5_000);
+    t.unref(); app.addHook('onClose', async () => clearInterval(t));
+  }
   app.addHook('onClose', async () => { await live.close(); await jobs.close(); await store.close(); });
 
   await app.register(cors, {
@@ -75,7 +91,7 @@ export async function buildApp(opts: AppOptions = {}) {
     database: store.kind,
     queue: jobs.mode,
     online: live.online,
-    features: { accounts: true, farmState: true, liveChannel: true, commodityFeeds: !!provider, exchange: true, processing: true, contracts: true, walletSignIn: true, vault: false },
+    features: { accounts: true, farmState: true, liveChannel: true, commodityFeeds: !!provider, exchange: true, processing: true, contracts: true, walletSignIn: true, vault: vault.enabled },
     market: { provider: provider?.name ?? null, publishedAt: market.snapshot?.updatedAt ?? null, feeds: market.snapshot?.commodities.filter(c => c.ref).map(c => ({ key: c.key, status: c.ref!.status, period: c.ref!.period })) ?? [] },
   }));
 
@@ -148,6 +164,84 @@ export async function buildApp(opts: AppOptions = {}) {
     return { ok: true, outcome: 'created', ...await startSession(player.id, player.name, wallet, ua) };
   });
 
+  // ---------------------------------------------------------------- Game Vault ($HRV)
+  const walletOf = (req: { player?: { wallet: string | null } }) => {
+    const w = req.player?.wallet;
+    if (!w) throw new VaultError(403, 'Sign in with your wallet first');
+    return getAddress(w) as Address;
+  };
+  app.setErrorHandler((err, _req, reply) => {
+    if (err instanceof VaultError) return reply.code(err.status).send({ ok: false, error: err.message });
+    reply.send(err);
+  });
+
+  /** Vault address, chain, $HRV price source and live treasury statistics. */
+  app.get('/v1/vault', async () => vault.info());
+
+  /** Public burn and treasury history, straight from indexed chain events. */
+  app.get<{ Querystring: { limit?: string } }>('/v1/vault/history', async req => {
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
+    const rows = await store.chain.events({ kinds: ['Spent', 'Burned', 'RewardsFunded', 'RewardClaimed'], limit });
+    return { events: rows.map(e => ({ kind: e.kind, player: e.player, amount: e.amount, extra: e.extra, txHash: e.txHash, block: e.block.toString(), at: +e.at })) };
+  });
+
+  app.get('/v1/vault/me', { preHandler: auth }, async req => {
+    const wallet = walletOf(req);
+    const [balance, rewards, purchases, events] = await Promise.all([
+      vault.balance(wallet), vault.rewards(wallet), store.chain.purchases(req.player!.id, 10), store.chain.events({ player: wallet, limit: 15 }),
+    ]);
+    return {
+      wallet, balance: balance.toString(),
+      rewards: { earned: rewards.earned.toString(), claimed: rewards.claimed.toString(), claimable: rewards.claimable.toString() },
+      purchases: purchases.map(p => ({ id: p.id, item: p.item, qty: p.qty, amountWei: p.amountWei, status: p.status, txHash: p.txHash, error: p.error, at: +p.createdAt })),
+      events: events.map(e => ({ kind: e.kind, amount: e.amount, extra: e.extra, txHash: e.txHash, at: +e.at })),
+    };
+  });
+
+  /** Prices a shop item in $HRV and returns the exact message for the player to sign. */
+  app.post('/v1/vault/quote', { preHandler: auth, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const wallet = walletOf(req), body = (req.body ?? {}) as Record<string, unknown>, now = Date.now();
+    const item = body.item, qty = body.qty;
+    if (typeof item !== 'string' || !Object.hasOwn(CATALOG_BY_ID, item) || !Number.isInteger(qty) || (qty as number) < 1 || (qty as number) > 99) return reply.code(400).send({ ok: false, error: 'Invalid item or quantity' });
+    const farm = await readFarm(store, req.player!.id, now);
+    const check = buy(farm.state, item, qty as number, now, 'hrv');
+    if (check.error) return reply.code(400).send({ ok: false, error: check.error });
+    const q = await vault.quote(req.player!.id, wallet, item, qty as number, now);
+    return {
+      ok: true, purchaseId: q.id, item, qty, usd: q.usd, usdPerHrv: q.usdPerHrv, priceSource: q.priceSource,
+      amountWei: q.amountWei, hrv: formatUnits(BigInt(q.amountWei), 18), deadline: q.deadlineSeconds,
+      typedData: { domain: q.domain, types: SPEND_TYPES, primaryType: 'Spend', message: { player: wallet, amount: q.amountWei, purchaseId: q.id, deadline: String(q.deadlineSeconds) } },
+    };
+  });
+
+  /** Settles a signed quote on-chain, then grants the item. */
+  app.post('/v1/vault/purchase', { preHandler: auth, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const wallet = walletOf(req), body = (req.body ?? {}) as Record<string, unknown>, now = Date.now();
+    if (typeof body.purchaseId !== 'string' || typeof body.signature !== 'string' || !/^0x[0-9a-fA-F]+$/.test(body.signature) || body.signature.length > 4000) return reply.code(400).send({ ok: false, error: 'Invalid request' });
+    const p = await store.chain.purchase(body.purchaseId);
+    if (!p || p.playerId !== req.player!.id || p.wallet !== wallet) return reply.code(404).send({ ok: false, error: 'Quote not found' });
+    // re-check the farm can take the item before taking any payment
+    const pre = buy((await readFarm(store, req.player!.id, now)).state, p.item, p.qty, now, 'hrv');
+    if (pre.error) return reply.code(400).send({ ok: false, error: pre.error });
+    const txHash = await vault.settle(p, body.signature as Hex, now);
+    // paid: grant the item (if the farm changed meanwhile and can't take it, compensate in Farm Coins)
+    const granted = await store.withFarm(req.player!.id, farm => {
+      const t = Date.now(), c = conditionsAt(t), ticked = tick(farm.state, t, c);
+      const r = buy(ticked, p.item, p.qty, t, 'hrv');
+      if (!r.error) return { next: { ...farm, state: r.state }, log: { seq: farm.lastSeq, type: 'buyHrv', payload: { purchaseId: p.id, item: p.item, qty: p.qty, txHash }, ok: true }, value: { state: r.state, events: r.events, compensated: false } };
+      const coins = Math.round(p.usd * 100), state = { ...ticked, coins: ticked.coins + coins };
+      return { next: { ...farm, state }, log: { seq: farm.lastSeq, type: 'buyHrv', payload: { purchaseId: p.id, compensated: coins, txHash }, ok: false, error: r.error }, value: { state, events: [{ kind: 'toast' as const, text: `${r.error} — refunded ${coins} Farm Coins`, tone: 'bad' as const }], compensated: true } };
+    });
+    if (granted.compensated) await store.chain.movePurchase(p.id, 'settled', { status: 'compensated' });
+    return { ok: true, txHash, ...granted };
+  });
+
+  /** Pays the player's unclaimed $HRV rewards into their Game Vault balance (relayed; no gas for the player). */
+  app.post('/v1/vault/claim', { preHandler: auth, config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async req => {
+    const wallet = walletOf(req);
+    return { ok: true, ...await vault.claim(wallet) };
+  });
+
   /** Ends this session (the farm and any linked wallet stay; sign in again with the wallet to return). */
   app.post('/v1/auth/logout', { preHandler: auth }, async req => {
     await store.deleteSession(hashToken(bearer(req)!));
@@ -173,6 +267,11 @@ export async function buildApp(opts: AppOptions = {}) {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const out = await runAction(store, playerId, body.seq, body.action, now, market);
     if (out.activity) live.activity(out.activity);
+    // delivered contracts earn $HRV rewards for wallet-linked farms, within a daily cap
+    if (out.body.ok && (body.action as { type?: string })?.type === 'deliver' && req.player!.wallet && vault.enabled) {
+      const hrv = await vault.accrueContractReward(req.player!.wallet, playerId, now).catch(() => 0);
+      if (hrv > 0) out.body.events = [...(out.body.events ?? []), { kind: 'toast', text: `+${hrv} HRV reward earned — claim it in your wallet`, tone: 'good' }];
+    }
     if (out.trade) {
       const t = out.trade;
       await market.recordTrade(t.farmId, t.item, t.side, t.qty, t.price, t.total, t.fee, now).catch(e => app.log.error({ err: e }, 'trade record failed'));

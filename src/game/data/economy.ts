@@ -1,6 +1,6 @@
 // Economy rules the UI must present. Token-side values are demonstration
 // numbers until $HRV launches; real quotes come from verified on-chain pricing
-// with liquidity checks (Stage 8), never from the client.
+// with liquidity checks, never from the client (see the Game Vault service).
 
 /** Demo token price for previews only: 1 HRV = $0.0125. */
 export const DEMO_HRV_USD = 0.0125;

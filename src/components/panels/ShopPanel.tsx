@@ -1,7 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { ITEM, ITEMS, SHOP_TABS, type Item } from '@/game/data/items';
-import { MAX_ITEM_USD, PURCHASE_SPLIT, QUOTE_SECONDS, fmtHrv, fmtUsd, toHrv } from '@/game/data/economy';
+import { MAX_ITEM_USD, PURCHASE_SPLIT, fmtHrv, fmtUsd, toHrv } from '@/game/data/economy';
+import { formatUnits } from 'viem';
+import { buyWithHrv } from '@/lib/wallet';
+import { queryClient } from '@/lib/queryClient';
+import { useVault } from '@/components/wallet/VaultSection';
 import { useGame } from '@/store/game';
 import { animalCapacity, buy, coinPrice } from '@/game/sim/engine';
 import { MACHINE_RULES, UNAVAILABLE, UNIQUE_BUILDINGS, type AnimalType } from '@/game/sim/rules';
@@ -35,35 +39,49 @@ function status(farm: FarmState, item: Item): { note?: string; blocked?: string 
   return have ? { note: `In storage: ${have}` } : {};
 }
 
-/** Purchase confirmation: quote with expiry, the burn/treasury split and the final total. */
+/** Purchase confirmation: pay with Farm Coins, or with $HRV from the Game Vault (burn/treasury split shown first). */
 function Confirm({ item, qty, onBack }: { item: Item; qty: number; onBack: () => void }) {
-  const act = useGame(s => s.act), farm = useGame(s => s.farm);
+  const act = useGame(s => s.act), farm = useGame(s => s.farm), session = useGame(s => s.session), open = useGame(s => s.openPanel), toast = useGame(s => s.toast);
+  const { info, me } = useVault();
+  const [step, setStep] = useState(''), [err, setErr] = useState('');
   const coins = coinPrice(item.id) * qty;
-  const [left, setLeft] = useState(QUOTE_SECONDS);
-  const [n, setN] = useState(0);
-  useEffect(() => { setLeft(QUOTE_SECONDS); const id = setInterval(() => setLeft(l => Math.max(0, l - 1)), 1000); return () => clearInterval(id); }, [n]);
-  const total = toHrv(item.usd) * qty;
+  const live = !!info?.enabled && !!info.price;
+  const hrv = live ? item.usd * qty / info!.price!.usdPerHrv : 0;
+  const vaultBal = me ? Number(formatUnits(BigInt(me.balance), 18)) : null;
+  const canHrv = live && !!session?.wallet && vaultBal !== null && vaultBal >= hrv;
+  const payHrv = async () => {
+    setErr('');
+    try { const r = await buyWithHrv(info!, item.id, qty, setStep); toast(`Paid ${r.hrv} HRV — half burned, half to the farmer reward treasury`, 'good'); await queryClient.invalidateQueries({ queryKey: ['vault'] }); onBack(); }
+    catch (e) { const m = (e as { shortMessage?: string; message?: string })?.shortMessage ?? (e as Error).message; setErr(/reject|denied|cancel/i.test(m) ? 'Cancelled in the wallet' : m); }
+    finally { setStep(''); }
+  };
   return (
     <Card className="flex flex-col gap-2">
       <b className="text-lg">Confirm purchase</b>
       <div className="flex items-center gap-3"><ItemIcon item={item} size={40} /><div><b>{qty} × {item.name}</b><div className="text-xs text-muted">{fmtUsd(item.usd)} reference each</div></div></div>
       <div className="border-2 border-leaf bg-[#e6f2d0] px-2 py-1.5 text-sm">
-        <div className="flex justify-between"><span>Pay now (Farm Coins · simulated)</span><b>{coins.toLocaleString('en-US')}</b></div>
+        <div className="flex justify-between"><span>Pay with Farm Coins (simulated)</span><b>{coins.toLocaleString('en-US')}</b></div>
         <div className="flex justify-between text-xs text-muted"><span>Balance after</span><span>{((farm?.coins ?? 0) - coins).toLocaleString('en-US')}</span></div>
       </div>
-      <b className="text-xs tracking-wide text-muted uppercase">With $HRV (Stage 8)</b>
-      <dl className="m-0 grid grid-cols-[1fr_auto] gap-y-1 text-sm">
-        <dt className="text-muted">Total</dt><dd className="m-0 text-right font-bold">{fmtHrv(total)}</dd>
-        <dt className="text-muted">Permanently burned ({PURCHASE_SPLIT.burn * 100}%)</dt><dd className="m-0 text-right">{fmtHrv(total * PURCHASE_SPLIT.burn)}</dd>
-        <dt className="text-muted">Farmer reward treasury ({PURCHASE_SPLIT.treasury * 100}%)</dt><dd className="m-0 text-right">{fmtHrv(total * PURCHASE_SPLIT.treasury)}</dd>
-        <dt className="text-muted">Paid from</dt><dd className="m-0 text-right">Game Vault</dd>
-      </dl>
-      <div className={`flex items-center justify-between border-2 px-2 py-1 text-sm ${left ? 'border-parch-d' : 'border-down text-down'}`}>
-        <span>{left ? `Quote valid for ${left}s` : 'Quote expired'}</span>
-        <button className="text-xs underline" onClick={() => setN(x => x + 1)}>Refresh quote</button>
+      <b className="text-xs tracking-wide text-muted uppercase">Or with $HRV from your Game Vault</b>
+      {live ? <>
+        <dl className="m-0 grid grid-cols-[1fr_auto] gap-y-1 text-sm">
+          <dt className="text-muted">Estimated total</dt><dd className="m-0 text-right font-bold">{hrv.toLocaleString('en-US', { maximumFractionDigits: 4 })} HRV</dd>
+          <dt className="text-muted">Permanently burned ({PURCHASE_SPLIT.burn * 100}%)</dt><dd className="m-0 text-right">{(hrv * PURCHASE_SPLIT.burn).toLocaleString('en-US', { maximumFractionDigits: 4 })}</dd>
+          <dt className="text-muted">Farmer reward treasury ({PURCHASE_SPLIT.treasury * 100}%)</dt><dd className="m-0 text-right">{(hrv * PURCHASE_SPLIT.treasury).toLocaleString('en-US', { maximumFractionDigits: 4 })}</dd>
+          <dt className="text-muted">Your vault balance</dt><dd className="m-0 text-right">{vaultBal === null ? '—' : vaultBal.toLocaleString('en-US', { maximumFractionDigits: 4 })} HRV</dd>
+        </dl>
+        <p className="m-0 text-xs leading-snug text-muted">Price: {info!.price!.source} · 1 HRV = ${info!.price!.usdPerHrv}. The server quotes the exact amount when you pay; you sign that amount for this one purchase (no gas), and the item arrives once it is confirmed on-chain.</p>
+      </> : <p className="m-0 text-sm text-muted">{info?.reason ?? 'Loading…'}</p>}
+      {step && <span className="text-sm">{step}</span>}
+      {err && <span className="text-sm text-down">{err}</span>}
+      <div className="flex flex-wrap gap-1.5">
+        <button className="btn-wood" onClick={onBack}>Back</button>
+        <button className="btn-gold" disabled={(farm?.coins ?? 0) < coins || !!step} onClick={() => { if (act({ type: 'buy', item: item.id, qty: qty })) onBack(); }}>Buy for {coins.toLocaleString('en-US')} coins</button>
+        {live && (session?.wallet
+          ? <button className="btn-gold" disabled={!canHrv || !!step} onClick={payHrv}>{canHrv ? `Pay ${hrv.toLocaleString('en-US', { maximumFractionDigits: 2 })} HRV` : 'Not enough HRV in vault'}</button>
+          : <button className="btn-wood" onClick={() => open('wallet')}>Sign in with wallet to pay in HRV</button>)}
       </div>
-      <p className="m-0 text-xs leading-snug text-muted">Prices are quoted by the server from verified $HRV pricing with liquidity checks; the price shown here is a demo rate. Burns only count once the transaction is confirmed on-chain.</p>
-      <div className="flex gap-1.5"><button className="btn-wood" onClick={onBack}>Back</button><button className="btn-gold" disabled={(farm?.coins ?? 0) < coins} onClick={() => { if (act({ type: 'buy', item: item.id, qty: qty })) onBack(); }}>Buy for {coins.toLocaleString('en-US')} coins</button></div>
     </Card>
   );
 }
@@ -71,6 +89,9 @@ function Confirm({ item, qty, onBack }: { item: Item; qty: number; onBack: () =>
 export function ShopPanel({ tab = 'seeds' }: { tab?: string }) {
   const close = useGame(s => s.closePanel), open = useGame(s => s.openPanel), farm = useGame(s => s.farm);
   const items = ITEMS.filter(i => i.category === tab);
+  // HRV prices come from the vault's price source when it is live, otherwise the labelled demo rate
+  const price = useVault().info?.price;
+  const hrvOf = (usd: number) => price ? `${(usd / price.usdPerHrv).toLocaleString('en-US', { maximumFractionDigits: 2 })} HRV` : fmtHrv(toHrv(usd));
   const [pick, setPick] = useState<string | null>(null);
   const [qty, setQty] = useState(1);
   const [confirm, setConfirm] = useState(false);
@@ -80,11 +101,11 @@ export function ShopPanel({ tab = 'seeds' }: { tab?: string }) {
 
   return (
     <Window title="Marketplace" icon="stall" tabs={TABS} tab={tab} onTab={k => { setPick(null); open('shop', k); }} onClose={close}
-      footer={<>Play uses simulated Farm Coins (100 coins = $1 reference). Every item also shows its $HRV price at a demo rate; no single item costs more than {fmtUsd(MAX_ITEM_USD)}. Real $HRV quotes arrive with the token (Stage 8).</>}>
+      footer={<>Play uses simulated Farm Coins (100 coins = $1 reference). Every item can also be paid in $HRV from your Game Vault at the server's quoted price; no single item costs more than {fmtUsd(MAX_ITEM_USD)}. Half of every $HRV purchase is burned and half funds the farmer reward treasury.</>}>
       {tab === 'listings' ? <Listings /> : (
         <div className="grid gap-3 md:grid-cols-[1fr_280px]">
           <div>
-            <div className="mb-2 flex items-center gap-2 text-sm"><b>General Store</b><span className="text-muted">· {SHOP_TABS.find(t => t.key === tab)?.label} {range}</span><span className="ml-auto"><SimTag>DEMO RATE · 1 HRV = $0.0125</SimTag></span></div>
+            <div className="mb-2 flex items-center gap-2 text-sm"><b>General Store</b><span className="text-muted">· {SHOP_TABS.find(t => t.key === tab)?.label} {range}</span><span className="ml-auto"><SimTag>{price ? `${price.verified ? 'LIVE' : 'TEST'} PRICE · 1 HRV = $${price.usdPerHrv}` : 'DEMO RATE · 1 HRV = $0.0125'}</SimTag></span></div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {items.map(i => (
                 <button key={i.id} onClick={() => setPick(i.id)}
@@ -92,7 +113,7 @@ export function ShopPanel({ tab = 'seeds' }: { tab?: string }) {
                   <span className="grid h-14 place-items-center"><ItemIcon item={i} size={i.thumb ? 56 : 40} /></span>
                   <b className="text-sm leading-tight">{i.name}</b>
                   <span className="text-sm font-bold text-up">{coinPrice(i.id).toLocaleString('en-US')} coins</span>
-                  <span className="text-[11px] text-muted">{fmtHrv(toHrv(i.usd))} · ≈ {fmtUsd(i.usd)}</span>
+                  <span className="text-[11px] text-muted">{hrvOf(i.usd)} · ≈ {fmtUsd(i.usd)}</span>
                 </button>
               ))}
             </div>
@@ -103,7 +124,7 @@ export function ShopPanel({ tab = 'seeds' }: { tab?: string }) {
               <b className="text-lg leading-tight">{item.name}</b>
               <p className="m-0 text-sm leading-snug">{item.desc}</p>
               {item.effect && <div className="border-l-4 border-leaf bg-[#e6f2d0] px-2 py-1 text-sm"><b>Effect:</b> {item.effect}</div>}
-              <div className="flex items-center justify-between text-sm"><span className="text-muted">Price each</span><b>{coinPrice(item.id).toLocaleString('en-US')} coins <span className="font-normal text-muted">· {fmtHrv(toHrv(item.usd))}</span></b></div>
+              <div className="flex items-center justify-between text-sm"><span className="text-muted">Price each</span><b>{coinPrice(item.id).toLocaleString('en-US')} coins <span className="font-normal text-muted">· {hrvOf(item.usd)}</span></b></div>
               {farm && (() => { const st = status(farm, item); return st.blocked ? <div className="border-2 border-parch-d bg-parch px-2 py-1 text-sm text-muted">{st.blocked}</div> : st.note ? <div className="text-sm text-muted">{st.note}</div> : null; })()}
               {(tab === 'seeds' || tab === 'feed' || tab === 'livestock') && (
                 <div className="flex items-center gap-2 text-sm">
@@ -130,7 +151,7 @@ function Listings() {
   ] as [string, string, number, number][];
   return (
     <div>
-      <div className="mb-2 flex items-center gap-2 text-sm"><b>Player listings</b><span className="text-muted">· buy produce from other farmers</span><span className="ml-auto"><SimTag>PREVIEW · STAGE 8</SimTag></span></div>
+      <div className="mb-2 flex items-center gap-2 text-sm"><b>Player listings</b><span className="text-muted">· buy produce from other farmers</span><span className="ml-auto"><SimTag>PREVIEW · STAGE 10</SimTag></span></div>
       <table className="w-full border-collapse text-sm">
         <thead><tr className="bg-bark text-left text-parch-l"><th className="p-1.5">Item</th><th className="p-1.5">Seller</th><th className="p-1.5 text-right">Qty</th><th className="p-1.5 text-right">Price each</th><th className="p-1.5" /></tr></thead>
         <tbody>
@@ -138,7 +159,7 @@ function Listings() {
             <tr key={id} className="border-b border-parch-d">
               <td className="p-1.5"><span className="flex items-center gap-2"><ItemIcon item={ITEM[id]} size={24} />{ITEM[id].name}</span></td>
               <td className="p-1.5 text-muted">{seller}</td><td className="p-1.5 text-right">{q}</td><td className="p-1.5 text-right font-semibold">{fmtHrv(hrv)}</td>
-              <td className="p-1.5 text-right"><StageButton stage={8}>Buy</StageButton></td>
+              <td className="p-1.5 text-right"><StageButton stage={10}>Buy</StageButton></td>
             </tr>
           ))}
         </tbody>

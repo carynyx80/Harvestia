@@ -4,6 +4,7 @@ import type { FarmEvent } from '../../shared/sim/engine';
 import type { FarmState } from '../../shared/sim/state';
 import type { WorldState } from '../../shared/world';
 import type { MarketSnapshot } from '../../shared/market';
+import type { VaultInfo } from '../../shared/vault';
 
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'https://harvestia-api.up.railway.app').replace(/\/$/, '');
 
@@ -47,6 +48,24 @@ export const getWalletNonce = () => call<{ nonce: string; issuedAt: number; expi
 export const verifyWallet = (message: string, signature: string, token?: string) =>
   call<Session & { ok: boolean; outcome: 'linked' | 'signed-in' | 'created'; serverTime: number }>('/v1/wallet/verify', { method: 'POST', token, body: JSON.stringify({ message, signature }), timeoutMs: 20_000 });
 export const logout = (token: string) => call<{ ok: boolean }>('/v1/auth/logout', { method: 'POST', token, body: '{}' });
+export const getVault = () => call<VaultInfo>('/v1/vault');
+export interface VaultMe {
+  wallet: string; balance: string;
+  rewards: { earned: string; claimed: string; claimable: string };
+  purchases: { id: string; item: string; qty: number; amountWei: string; status: string; txHash: string | null; error: string | null; at: number }[];
+  events: { kind: string; amount: string; extra: Record<string, string>; txHash: string; at: number }[];
+}
+export const getVaultMe = (token: string) => call<VaultMe>('/v1/vault/me', { token });
+export interface VaultHistoryEvent { kind: string; player: string | null; amount: string; extra: Record<string, string>; txHash: string; block: string; at: number }
+export const getVaultHistory = () => call<{ events: VaultHistoryEvent[] }>('/v1/vault/history?limit=20');
+export interface HrvQuote {
+  ok: boolean; purchaseId: `0x${string}`; item: string; qty: number; usd: number; usdPerHrv: number; priceSource: string; amountWei: string; hrv: string; deadline: number;
+  typedData: { domain: { name: string; version: string; chainId: number; verifyingContract: `0x${string}` }; message: { player: `0x${string}`; amount: string; purchaseId: `0x${string}`; deadline: string } };
+}
+export const quoteHrv = (token: string, item: string, qty: number) => call<HrvQuote>('/v1/vault/quote', { method: 'POST', token, body: JSON.stringify({ item, qty }) });
+export const purchaseHrv = (token: string, purchaseId: string, signature: string) =>
+  call<{ ok: boolean; txHash: string; state: FarmState; events: FarmEvent[]; compensated: boolean }>('/v1/vault/purchase', { method: 'POST', token, body: JSON.stringify({ purchaseId, signature }), timeoutMs: 90_000 });
+export const claimHrvRewards = (token: string) => call<{ ok: boolean; hash: string; amount: string }>('/v1/vault/claim', { method: 'POST', token, body: '{}', timeoutMs: 90_000 });
 export const getMarket = () => call<MarketSnapshot>('/v1/market');
 export interface MarketHistory {
   key: string;

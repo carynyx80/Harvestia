@@ -21,7 +21,7 @@ test('status reports stage, storage and queue mode', async () => {
   const { app } = await setup();
   const body = (await app.inject({ method: 'GET', url: '/v1/status' })).json();
   assert.equal(body.service, 'harvestia-api');
-  assert.equal(body.stage, 7);
+  assert.equal(body.stage, 8);
   assert.equal(body.database, 'memory');
   assert.equal(body.features.accounts, true);
 });

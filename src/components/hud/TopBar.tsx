@@ -6,6 +6,8 @@ import { xpForLevel } from '@/game/sim/rules';
 import { Icon, Sprite, type IconName } from './Icon';
 import { shortAddress } from '@/lib/wallet';
 import { fmtToken, useWalletData } from '@/components/wallet/useWalletData';
+import { useVault } from '@/components/wallet/VaultSection';
+import { formatUnits } from 'viem';
 
 const drawAvatar = () => HV.farmer(2, 1, 0, false, { shirt: '#c4553b', pants: '#3f6fa8' }, 'front');
 
@@ -39,6 +41,8 @@ export function TopBar() {
   const open = useGame(s => s.openPanel), farm = useGame(s => s.farm);
   const farmName = useGame(s => s.session?.farmName) ?? 'Sunny Acres', linked = useGame(s => s.session?.wallet ?? null);
   const w = useWalletData(), address = w.account.address;
+  const vault = useVault();
+  const vaultLabel = !vault.info?.enabled ? 'Not open' : vault.me ? `${fmtToken(Number(formatUnits(BigInt(vault.me.balance), 18)), 0)} HRV` : '— HRV';
   const hrvLabel = !address ? '— HRV' : !w.hrvLaunched ? 'Not launched' : `${fmtToken(w.hrv, 0)} ${w.hrvSymbol}`;
   const level = farm?.level ?? 1, xp = farm?.xp ?? 0, next = xpForLevel(level);
   return (
@@ -61,8 +65,8 @@ export function TopBar() {
       </button>
       <div className="pointer-events-auto mt-1 ml-auto flex flex-wrap items-center justify-end gap-2">
         <Pill icon="coin" label="Wallet" value={hrvLabel} title={address ? 'Your $HRV balance, read from Robinhood Chain' : 'Connect a wallet to read your $HRV balance'} onClick={() => open('wallet')} />
-        <Pill icon="vault" label="Game Vault" value="— HRV" title="Deposited $HRV available for in-game spending (Stage 8)" onClick={() => open('wallet')} />
-        <div className="hidden md:block"><Pill icon="seed" label="Farm Coins · sim" value={(farm?.coins ?? 0).toLocaleString('en-US')} tone="green" title="Simulated currency for play until $HRV integration (Stage 8)" onClick={() => open('inventory')} /></div>
+        <Pill icon="vault" label="Game Vault" value={vaultLabel} title={vault.info?.enabled ? 'Deposited $HRV available for in-game spending' : vault.info?.reason ?? 'Game Vault'} onClick={() => open('wallet')} />
+        <div className="hidden md:block"><Pill icon="seed" label="Farm Coins · sim" value={(farm?.coins ?? 0).toLocaleString('en-US')} tone="green" title="Simulated currency for everyday play; $HRV purchases use your Game Vault" onClick={() => open('inventory')} /></div>
         <div className="hidden md:block"><WeatherPill /></div>
         {address && linked === address
           ? <button className="btn-wood flex items-center gap-1.5" onClick={() => open('wallet')} title="Signed in with this wallet (V)"><i className="inline-block size-2 border border-wood-d bg-[#4ce06a]" />{shortAddress(address)}</button>

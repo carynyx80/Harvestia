@@ -239,7 +239,11 @@ const NAMES: Record<AnimalType, string[]> = {
 };
 
 // ------------------------------------------------------------------ shop & economy
-export function buy(prev: FarmState, itemId: string, qty: number, now: number): Result {
+/**
+ * Buys from the general store. `payment: 'hrv'` is used only by the server after an
+ * on-chain $HRV payment has settled, so no Farm Coins are charged; it is never a client action.
+ */
+export function buy(prev: FarmState, itemId: string, qty: number, now: number, payment: 'coins' | 'hrv' = 'coins'): Result {
   const item = ITEM[itemId];
   if (!item) return fail(prev, 'Unknown item');
   if (UNAVAILABLE[itemId]) return fail(prev, UNAVAILABLE[itemId]);
@@ -280,6 +284,11 @@ export function buy(prev: FarmState, itemId: string, qty: number, now: number): 
       s.machines[itemId] = 1; break;
     }
     default: return fail(prev, 'This item is not sold in the store');
+  }
+  if (payment === 'hrv') {
+    bump(s, 'hrvPurchases', 1);
+    events.unshift({ kind: 'toast', text: `Bought ${qty > 1 ? `${qty} × ` : ''}${item.name} with $HRV`, tone: 'good' });
+    return { state: s, events };
   }
   // checked after the item-specific rules so the player sees the most useful reason
   if (prev.coins < cost) return fail(prev, `Not enough coins — you need ${cost.toLocaleString('en-US')}`);

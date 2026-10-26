@@ -5,10 +5,12 @@
 import { randomBytes } from 'node:crypto';
 import { createPublicClient, defineChain, getAddress, http, isAddress, recoverMessageAddress, type Hex } from 'viem';
 import { parseSiweMessage } from 'viem/siwe';
-import { CHAINS, NONCE_TTL_MS, SIGN_IN_STATEMENT, type ChainInfo } from '../../shared/chains';
+import { CHAINS, LOCAL_CHAIN, NONCE_TTL_MS, SIGN_IN_STATEMENT, type ChainInfo } from '../../shared/chains';
 
 const viemChain = (c: ChainInfo) => defineChain({ id: c.id, name: c.name, nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: { default: { http: [c.rpc] } } });
-const clients = new Map(CHAINS.map(c => [c.id, createPublicClient({ chain: viemChain(c), transport: http(c.rpc, { timeout: 10_000 }) })]));
+// the local test chain is accepted only outside production
+const SIGN_IN_CHAINS = process.env.NODE_ENV === 'production' ? CHAINS : [...CHAINS, LOCAL_CHAIN];
+const clients = new Map(SIGN_IN_CHAINS.map(c => [c.id, createPublicClient({ chain: viemChain(c), transport: http(c.rpc, { timeout: 10_000 }) })]));
 
 export const newNonce = () => randomBytes(16).toString('hex');
 
