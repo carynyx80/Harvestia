@@ -10,6 +10,9 @@ const pad = (n: number) => String(n).padStart(2, '0');
 const OPEN_DATE = new Date(OPENS);
 const OPEN_DAY = OPEN_DATE.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' });
 const OPEN_TIME = OPEN_DATE.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' });
+const TOKEN_DATE = new Date(TOKEN_LAUNCH_AT);
+const TOKEN_DAY = TOKEN_DATE.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
+const TOKEN_TIME = TOKEN_DATE.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' });
 const OPEN_FULL = OPEN_DATE.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 
 export function LaunchGate() {
@@ -38,8 +41,8 @@ export function LaunchGate() {
           ))}
         </div>
         <p className="m-0 text-sm leading-snug">
-          {tokenLive ? <><b>$HRV is live on Robinhood Chain.</b> </> : <><b>$HRV launches on Robinhood Chain today at 3:00 PM UTC.</b> </>}
-          The farm opens {OPEN_DAY}. Your farm, the commodity exchange and wallet sign-in will be ready the moment the doors open.
+          {tokenLive ? <><b>$HRV is live on Robinhood Chain.</b> </> : <><b>$HRV launches on Robinhood Chain on {TOKEN_DAY} at {TOKEN_TIME} UTC.</b> </>}
+          The doors open one hour after the token. Your farm, the commodity exchange and wallet sign-in will be ready the moment they do.
         </p>
         <div className="flex gap-2">
           <a className="btn-gold" href="https://x.com/Harvestiaa" target="_blank" rel="noreferrer">Follow @Harvestiaa</a>
