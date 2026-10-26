@@ -35,6 +35,7 @@ function WeatherPill() {
 
 export function TopBar() {
   const open = useGame(s => s.openPanel), farm = useGame(s => s.farm);
+  const farmName = useGame(s => s.session?.farmName) ?? 'Sunny Acres';
   const level = farm?.level ?? 1, xp = farm?.xp ?? 0, next = xpForLevel(level);
   return (
     <header className="pointer-events-none absolute inset-x-2.5 top-2.5 flex items-start gap-2.5">
@@ -47,7 +48,7 @@ export function TopBar() {
           <Sprite w={13} h={16} scale={3} draw={drawAvatar} className="mt-1.5" />
         </div>
         <div>
-          <div className="text-[17px] font-bold whitespace-nowrap">Sunny Acres <span className="ml-1 border-2 border-[#2c6e2c] bg-leaf px-1.5 text-[13px] text-white">Lv {level}</span></div>
+          <div className="text-[17px] font-bold whitespace-nowrap">{farmName} <span className="ml-1 border-2 border-[#2c6e2c] bg-leaf px-1.5 text-[13px] text-white">Lv {level}</span></div>
           <div className="relative mt-1 h-4 w-[168px] border-2 border-wood-d bg-[#6b4a2e]">
             <i className="xp-fill absolute inset-y-0 left-0" style={{ width: `${Math.min(100, xp / next * 100)}%` }} />
             <b className="relative block text-center text-[11px] leading-3 font-semibold text-white [text-shadow:0_1px_0_#2a1a10]">{xp.toLocaleString('en-US')} / {next.toLocaleString('en-US')} XP</b>
