@@ -8,6 +8,7 @@ import { config } from './config';
 import { bearer, cleanName, hashToken, newToken, randomFarmName, randomPlayerName, requirePlayer } from './auth';
 import { newNonce, verifySignIn } from './wallet';
 import { CHAINS, NONCE_TTL_MS } from '../../shared/chains';
+import { isOpenAt } from '../../shared/launch';
 import { SpeedGuard, readFarm, runAction } from './farm';
 import { Jobs } from './jobs';
 import { LiveHub } from './live';
@@ -92,6 +93,7 @@ export async function buildApp(opts: AppOptions = {}) {
     queue: jobs.mode,
     online: live.online,
     opensAt: config.opensAt || null,
+    open: !config.opensAt || isOpenAt(Date.now(), config.opensAt),
     features: { accounts: true, farmState: true, liveChannel: true, commodityFeeds: !!provider, exchange: true, processing: true, contracts: true, walletSignIn: true, vault: vault.enabled },
     market: { provider: provider?.name ?? null, publishedAt: market.snapshot?.updatedAt ?? null, feeds: market.snapshot?.commodities.filter(c => c.ref).map(c => ({ key: c.key, status: c.ref!.status, period: c.ref!.period })) ?? [] },
   }));
@@ -264,7 +266,7 @@ export async function buildApp(opts: AppOptions = {}) {
 
   app.post('/v1/farm/actions', { preHandler: auth }, async (req, reply) => {
     const now = Date.now(), playerId = req.player!.id;
-    if (now < config.opensAt) return reply.code(403).send({ ok: false, error: `Doors open ${new Date(config.opensAt).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'UTC' })} UTC`, opensAt: config.opensAt, serverTime: now });
+    if (config.opensAt && !isOpenAt(now, config.opensAt)) return reply.code(403).send({ ok: false, error: `Doors open ${new Date(config.opensAt).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'UTC' })} UTC`, opensAt: config.opensAt, serverTime: now });
     if (speed.tooFast(playerId, now)) return reply.code(429).send({ ok: false, error: 'Too many actions at once — slow down a little' });
     const body = (req.body ?? {}) as Record<string, unknown>;
     const out = await runAction(store, playerId, body.seq, body.action, now, market);

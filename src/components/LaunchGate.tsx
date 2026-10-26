@@ -3,7 +3,7 @@
 // The server also refuses farm actions before then, so this is not just cosmetic.
 import { useEffect, useState } from 'react';
 import { useGame } from '@/store/game';
-import { LAUNCH_OPENS_AT, TOKEN_LAUNCH_AT } from '../../shared/launch';
+import { LAUNCH_OPENS_AT, TOKEN_LAUNCH_AT, isOpenAt } from '../../shared/launch';
 
 const OPENS = Number(process.env.NEXT_PUBLIC_LAUNCH_OPENS_AT) || LAUNCH_OPENS_AT;
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -20,8 +20,10 @@ export function LaunchGate() {
   const [now, setNow] = useState<number | null>(null);
   useEffect(() => { setNow(Date.now()); const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id); }, []);
   const t = now === null ? null : now + offset;
-  const open = t !== null && t >= OPENS;
-  useEffect(() => { if (open && now !== null && now + offset - OPENS < 5000) toast('The doors are open — welcome to Harvestia!', 'good'); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  // open after launch or during an early-access window; the gate comes back by itself when a window ends
+  const open = t !== null && isOpenAt(t, OPENS);
+  const [wasClosed, setWasClosed] = useState(false);
+  useEffect(() => { if (t === null) return; if (!open) setWasClosed(true); else if (wasClosed) { toast('The doors are open — welcome to Harvestia!', 'good'); setWasClosed(false); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   if (t === null || open) return null;
 
   const left = Math.max(0, OPENS - t), d = Math.floor(left / 86_400_000), h = Math.floor(left / 3600_000) % 24, m = Math.floor(left / 60_000) % 60, s = Math.floor(left / 1000) % 60;
