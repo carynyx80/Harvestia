@@ -16,6 +16,8 @@ export const config = {
   /** Run scheduled jobs in this process (set WORKER=0 on extra API replicas). */
   worker: process.env.WORKER !== '0',
   sessionDays: 90,
+  /** Farm actions are refused before this (ms since epoch); 0 disables the gate. Tests run ungated. */
+  opensAt: process.env.NODE_ENV === 'test' ? 0 : Date.parse(process.env.LAUNCH_OPENS_AT ?? '2026-10-26T16:00:00Z') || 0,
   /** Reference price provider: 'imf' (IMF Primary Commodity Prices via FRED) or 'off'. */
   marketProvider: process.env.MARKET_PROVIDER ?? 'imf',
   /** Exact origins allowed to call the API (the Vercel frontend and local dev). */

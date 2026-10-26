@@ -91,6 +91,7 @@ export async function buildApp(opts: AppOptions = {}) {
     database: store.kind,
     queue: jobs.mode,
     online: live.online,
+    opensAt: config.opensAt || null,
     features: { accounts: true, farmState: true, liveChannel: true, commodityFeeds: !!provider, exchange: true, processing: true, contracts: true, walletSignIn: true, vault: vault.enabled },
     market: { provider: provider?.name ?? null, publishedAt: market.snapshot?.updatedAt ?? null, feeds: market.snapshot?.commodities.filter(c => c.ref).map(c => ({ key: c.key, status: c.ref!.status, period: c.ref!.period })) ?? [] },
   }));
@@ -263,6 +264,7 @@ export async function buildApp(opts: AppOptions = {}) {
 
   app.post('/v1/farm/actions', { preHandler: auth }, async (req, reply) => {
     const now = Date.now(), playerId = req.player!.id;
+    if (now < config.opensAt) return reply.code(403).send({ ok: false, error: 'Doors open at 4:00 PM UTC on October 26', opensAt: config.opensAt, serverTime: now });
     if (speed.tooFast(playerId, now)) return reply.code(429).send({ ok: false, error: 'Too many actions at once — slow down a little' });
     const body = (req.body ?? {}) as Record<string, unknown>;
     const out = await runAction(store, playerId, body.seq, body.action, now, market);

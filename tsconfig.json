@@ -39,6 +39,7 @@
     "node_modules",
     "public",
     "server",
-    "contracts"
+    "contracts",
+    "marketing"
   ]
 }

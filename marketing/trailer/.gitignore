@@ -1,0 +1,8 @@
+node_modules/
+clips/
+stills/
+out/
+sprites.js
+harvestia-logo.png
+market.json
+hist-*.json
