@@ -16,6 +16,8 @@ export const config = {
   /** Run scheduled jobs in this process (set WORKER=0 on extra API replicas). */
   worker: process.env.WORKER !== '0',
   sessionDays: 90,
+  /** Reference price provider: 'imf' (IMF Primary Commodity Prices via FRED) or 'off'. */
+  marketProvider: process.env.MARKET_PROVIDER ?? 'imf',
   /** Exact origins allowed to call the API (the Vercel frontend and local dev). */
   corsOrigins: list(process.env.CORS_ORIGINS ?? 'https://harvestia-one.vercel.app,http://localhost:5180'),
   /** Vercel preview deployments of this project, e.g. harvestia-abc123-carynyx1.vercel.app */

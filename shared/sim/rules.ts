@@ -40,10 +40,10 @@ export const BASE_CAPACITY: Record<AnimalType, number> = { chicken: 8, sheep: 6,
 /** Extra animal capacity granted by each building bought. */
 export const BUILDING_CAPACITY: Record<string, [AnimalType, number] | ['storage', number] | null> = {
   'bld-coop': ['chicken', 8], 'bld-shelter': ['pig', 4], 'bld-barn': ['cow', 6], 'bld-silo': ['storage', 200],
-  'bld-greenhouse': null, 'bld-dairy': null,
+  'bld-greenhouse': null, 'bld-dairy': null, 'bld-cold': null,
 };
 /** Buildings the starting farm already has (one each, can't buy twice). */
-export const UNIQUE_BUILDINGS = ['bld-greenhouse', 'bld-dairy'];
+export const UNIQUE_BUILDINGS = ['bld-greenhouse', 'bld-dairy', 'bld-cold'];
 
 export const BASE_STORAGE = 1000;
 export const STORAGE_UPGRADE = 300;
@@ -55,7 +55,7 @@ export const MACHINE_RULES: Record<string, MachineRule> = {
   'mach-tractor': { maxLevel: 5, upgrade: l => 300 * l, describe: l => `Fields grow ${Math.round(tractorBonus(l) * 100)}% faster` },
   'mach-harvester': { maxLevel: 5, upgrade: l => 400 * l, describe: l => `Harvests a whole field, +${l - 1} bonus per field` },
   'mach-planter': { maxLevel: 1, upgrade: () => 0, describe: () => 'Plants a whole field at once' },
-  'mach-mill': { maxLevel: 1, upgrade: () => 0, describe: () => '2× flour speed (processing opens in Stage 7)' },
+  'mach-mill': { maxLevel: 1, upgrade: () => 0, describe: () => 'Grain mill works twice as fast' },
   'mach-storage': { maxLevel: 1, upgrade: () => 0, describe: () => `+${STORAGE_UPGRADE} storage` },
 };
 export const canCapacity = (level: number) => 10 * level;
@@ -79,3 +79,39 @@ export const TASKS: TaskRule[] = [
   { id: 't-feed', text: 'Feed 4 animals', stat: 'fed', target: 4, coins: 40, xp: 15 },
   { id: 't-sell', text: 'Earn 300 coins from sales', stat: 'earned', target: 300, coins: 120, xp: 40 },
 ];
+
+// ------------------------------------------------------------------ processing
+export type Facility = 'mill' | 'dairy' | 'factory';
+export const FACILITIES: Record<Facility, { name: string; needs?: string; desc: string }> = {
+  mill: { name: 'Grain Mill', desc: 'Grinds grain into flour and meal. Millstones double its speed.' },
+  dairy: { name: 'Dairy', needs: 'bld-dairy', desc: 'Turns milk into cheese and butter.' },
+  factory: { name: 'Food Processing', desc: 'Makes sauce, oil, roasted coffee and chocolate.' },
+};
+export interface Recipe { id: string; facility: Facility; inputs: Record<string, number>; output: [string, number]; seconds: number; xp: number; level: number }
+/** seconds = real seconds per batch. Outputs are worth roughly 25–50% more than their inputs. */
+export const RECIPES: Recipe[] = [
+  { id: 'flour', facility: 'mill', inputs: { 'crop-wheat': 3 }, output: ['good-flour', 2], seconds: 20, xp: 2, level: 1 },
+  { id: 'cornmeal', facility: 'mill', inputs: { 'crop-corn': 3 }, output: ['good-cornmeal', 2], seconds: 25, xp: 2, level: 1 },
+  { id: 'cheese', facility: 'dairy', inputs: { 'prod-milk': 2 }, output: ['good-cheese', 1], seconds: 45, xp: 3, level: 1 },
+  { id: 'butter', facility: 'dairy', inputs: { 'prod-milk': 2 }, output: ['good-butter', 1], seconds: 30, xp: 2, level: 1 },
+  { id: 'sauce', facility: 'factory', inputs: { 'crop-tomato': 2 }, output: ['good-sauce', 1], seconds: 40, xp: 3, level: 3 },
+  { id: 'soyoil', facility: 'factory', inputs: { 'crop-soy': 3 }, output: ['good-soyoil', 1], seconds: 40, xp: 3, level: 2 },
+  { id: 'roast', facility: 'factory', inputs: { 'crop-coffee': 1 }, output: ['good-coffee', 1], seconds: 60, xp: 4, level: 5 },
+  { id: 'chocolate', facility: 'factory', inputs: { 'crop-cocoa': 1 }, output: ['good-chocolate', 1], seconds: 75, xp: 5, level: 6 },
+];
+export const RECIPE_BY_ID: Record<string, Recipe> = Object.fromEntries(RECIPES.map(r => [r.id, r]));
+export const MAX_BATCHES = 20;
+export const recipeSeconds = (r: Recipe, machines: Record<string, number>) => r.facility === 'mill' && machines['mach-mill'] ? r.seconds / 2 : r.seconds;
+
+// ------------------------------------------------------------------ produce storage
+/** Share of stock lost per real hour without cold storage. */
+export const PERISHABLE: Record<string, number> = { 'prod-egg': 0.04, 'prod-milk': 0.05, 'crop-tomato': 0.03 };
+
+// ------------------------------------------------------------------ delivery contracts
+export const CONTRACT_SLOTS = 3;
+/** real time to deliver a contract before it expires */
+export const CONTRACT_MS = 2 * 3600_000;
+/** a skipped or completed slot gets a new contract after this long */
+export const CONTRACT_REFILL_MS = 10 * 60_000;
+/** contracts pay this multiple of the goods' fixed base value — never a live market price */
+export const CONTRACT_PREMIUM = 1.3;

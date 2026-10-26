@@ -1,7 +1,7 @@
 // PostgreSQL store via Prisma. Farm writes take a row lock (SELECT … FOR UPDATE)
 // inside a transaction, so concurrent requests for one farm apply in order.
 import { Prisma, PrismaClient } from '@prisma/client';
-import type { FarmRow, FarmTxResult, LeaderRow, PlayerRow, Store } from './types';
+import type { FarmRow, FarmTxResult, FeedRow, LeaderRow, MarketRepo, PlayerRow, PriceRow, RefRow, Store, TradeRow } from './types';
 import type { FarmState } from '../../../shared/sim/state';
 
 const json = (v: unknown) => v as Prisma.InputJsonValue;
@@ -13,7 +13,8 @@ const inventoryRows = (farmId: string, s: FarmState) =>
 
 export class PrismaStore implements Store {
   readonly kind = 'postgres' as const;
-  constructor(private db = new PrismaClient()) {}
+  readonly market: MarketRepo;
+  constructor(private db = new PrismaClient()) { this.market = new PrismaMarket(db); }
 
   async createPlayerWithFarm(name: string, farmName: string, state: FarmState) {
     return this.db.$transaction(async tx => {
@@ -79,3 +80,55 @@ export class PrismaStore implements Store {
 
   async close() { await this.db.$disconnect(); }
 }
+
+/** Market persistence in PostgreSQL. */
+export class PrismaMarket implements MarketRepo {
+  constructor(private db: PrismaClient) {}
+
+  async saveReferences(rows: RefRow[]) {
+    await this.db.$transaction(rows.map(r => this.db.referencePrice.upsert({
+      where: { commodity_period: { commodity: r.commodity, period: r.period } },
+      create: r, update: { value: r.value, unit: r.unit, usdPerTonne: r.usdPerTonne, source: r.source, fetchedAt: r.fetchedAt },
+    })));
+  }
+  async references(commodity: string, since: Date) {
+    return this.db.referencePrice.findMany({ where: { commodity, period: { gte: since } }, orderBy: { period: 'asc' } });
+  }
+  async saveFeed(row: FeedRow) {
+    await this.db.marketFeed.upsert({ where: { commodity: row.commodity }, create: row, update: row });
+  }
+  async feeds() { return this.db.marketFeed.findMany(); }
+  async savePrices(rows: PriceRow[]) {
+    await this.db.commodityPrice.createMany({ data: rows.map(r => ({ ...r, parts: json(r.parts) })) });
+  }
+  async latestPrices() {
+    const rows = await this.db.commodityPrice.findMany({ distinct: ['commodity'], orderBy: [{ commodity: 'asc' }, { at: 'desc' }] });
+    return rows.map(priceRow);
+  }
+  async priceBefore(commodity: string, at: Date) {
+    const r = await this.db.commodityPrice.findFirst({ where: { commodity, at: { lte: at } }, orderBy: { at: 'desc' } });
+    return r ? priceRow(r) : null;
+  }
+  async prices(commodity: string, since: Date) {
+    return (await this.db.commodityPrice.findMany({ where: { commodity, at: { gte: since } }, orderBy: { at: 'asc' } })).map(priceRow);
+  }
+  async addPressure(commodity: string, delta: number, now: Date, decay: (p: number, ms: number) => number) {
+    await this.db.$transaction(async tx => {
+      await tx.$executeRaw`INSERT INTO "CommodityBook" ("commodity", "pressure", "updatedAt") VALUES (${commodity}, 0, ${now}) ON CONFLICT ("commodity") DO NOTHING`;
+      const [b] = await tx.$queryRaw<{ pressure: number; updatedAt: Date }[]>`SELECT "pressure", "updatedAt" FROM "CommodityBook" WHERE "commodity" = ${commodity} FOR UPDATE`;
+      await tx.commodityBook.update({ where: { commodity }, data: { pressure: decay(b.pressure, +now - +b.updatedAt) + delta, updatedAt: now } });
+    });
+  }
+  async books() { return this.db.commodityBook.findMany(); }
+  async saveTrade(row: TradeRow) { await this.db.trade.create({ data: row }); }
+  async trades(commodity: string, limit: number) {
+    const rows = await this.db.trade.findMany({ where: { commodity }, orderBy: { at: 'desc' }, take: limit });
+    return rows.map(t => ({ ...t, side: t.side as 'buy' | 'sell' }));
+  }
+  async volumes(since: Date) {
+    const rows = await this.db.trade.groupBy({ by: ['commodity'], where: { at: { gte: since } }, _sum: { qty: true } });
+    return Object.fromEntries(rows.map(r => [r.commodity, r._sum.qty ?? 0]));
+  }
+}
+const priceRow = (r: { commodity: string; at: Date; mid: number; target: number; parts: Prisma.JsonValue }): PriceRow =>
+  ({ commodity: r.commodity, at: r.at, mid: r.mid, target: r.target, parts: r.parts as unknown as PriceRow['parts'] });

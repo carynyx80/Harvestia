@@ -5,7 +5,7 @@ import { Redis } from 'ioredis';
 import type { WebSocket } from 'ws';
 
 const CHANNEL = 'harvestia:live';
-export interface LiveMessage { type: 'presence' | 'activity' | 'hello'; online?: number; text?: string; at?: number }
+export interface LiveMessage { type: 'presence' | 'activity' | 'hello' | 'market'; online?: number; text?: string; at?: number }
 
 export class LiveHub {
   private sockets = new Set<WebSocket>();
@@ -33,6 +33,13 @@ export class LiveHub {
   /** Publishes a public activity line to every connected player (on every instance). */
   activity(text: string) {
     const msg: LiveMessage = { type: 'activity', text, at: Date.now() };
+    if (this.pub) this.pub.publish(CHANNEL, JSON.stringify(msg)).catch(() => this.deliver(msg));
+    else this.deliver(msg);
+  }
+
+  /** Tells every player that new market prices were published (they refetch /v1/market). */
+  market(at: number) {
+    const msg: LiveMessage = { type: 'market', at };
     if (this.pub) this.pub.publish(CHANNEL, JSON.stringify(msg)).catch(() => this.deliver(msg));
     else this.deliver(msg);
   }

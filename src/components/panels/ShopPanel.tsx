@@ -130,7 +130,7 @@ function Listings() {
   ] as [string, string, number, number][];
   return (
     <div>
-      <div className="mb-2 flex items-center gap-2 text-sm"><b>Player listings</b><span className="text-muted">· buy produce from other farmers</span><span className="ml-auto"><SimTag>PREVIEW · STAGE 7</SimTag></span></div>
+      <div className="mb-2 flex items-center gap-2 text-sm"><b>Player listings</b><span className="text-muted">· buy produce from other farmers</span><span className="ml-auto"><SimTag>PREVIEW · STAGE 8</SimTag></span></div>
       <table className="w-full border-collapse text-sm">
         <thead><tr className="bg-bark text-left text-parch-l"><th className="p-1.5">Item</th><th className="p-1.5">Seller</th><th className="p-1.5 text-right">Qty</th><th className="p-1.5 text-right">Price each</th><th className="p-1.5" /></tr></thead>
         <tbody>
@@ -138,7 +138,7 @@ function Listings() {
             <tr key={id} className="border-b border-parch-d">
               <td className="p-1.5"><span className="flex items-center gap-2"><ItemIcon item={ITEM[id]} size={24} />{ITEM[id].name}</span></td>
               <td className="p-1.5 text-muted">{seller}</td><td className="p-1.5 text-right">{q}</td><td className="p-1.5 text-right font-semibold">{fmtHrv(hrv)}</td>
-              <td className="p-1.5 text-right"><StageButton stage={7}>Buy</StageButton></td>
+              <td className="p-1.5 text-right"><StageButton stage={8}>Buy</StageButton></td>
             </tr>
           ))}
         </tbody>

@@ -5,9 +5,10 @@ import { InventoryPanel } from './InventoryPanel';
 import { ShopPanel } from './ShopPanel';
 import { EquipmentPanel, FarmPanel, LivestockPanel, ProfilePanel } from './FarmPanels';
 import { CompetitionsPanel, CoopPanel, ExchangePanel, WalletPanel } from './MarketPanels';
+import { ContractsPanel, ProcessingPanel } from './EconomyPanels';
 
 const HOTKEYS: Record<string, [PanelId, string?]> = {
-  i: ['inventory'], b: ['shop', 'seeds'], e: ['exchange'], p: ['profile'], l: ['livestock'], m: ['equipment'], f: ['farm'], v: ['wallet'],
+  i: ['inventory'], b: ['shop', 'seeds'], e: ['exchange'], r: ['processing'], c: ['contracts'], p: ['profile'], l: ['livestock'], m: ['equipment'], f: ['farm'], v: ['wallet'],
 };
 
 /** Shows the open game window and owns the window keyboard shortcuts. */
@@ -35,6 +36,8 @@ export function PanelHost() {
     case 'equipment': return <EquipmentPanel />;
     case 'livestock': return <LivestockPanel tab={tab} />;
     case 'exchange': return <ExchangePanel tab={tab} />;
+    case 'processing': return <ProcessingPanel tab={tab} />;
+    case 'contracts': return <ContractsPanel />;
     case 'wallet': return <WalletPanel />;
     case 'coop': return <CoopPanel />;
     case 'competitions': return <CompetitionsPanel />;

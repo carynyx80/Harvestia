@@ -3,12 +3,16 @@
 import { hash } from '../hash';
 import { PLOTS, plotCells, type CropType } from '../geometry';
 import { ANIMALS as DEMO_ANIMALS, INVENTORY as DEMO_INVENTORY } from '../starter';
-import { CROP_RULES, STAGE_AT, TASKS, type AnimalType } from './rules';
+import { CROP_RULES, STAGE_AT, TASKS, type AnimalType, type Facility } from './rules';
 
 export interface CellState { crop: CropType | null; growth: number; wetUntil: number }
 export interface PlotState { unlocked: boolean; fertile: boolean; irrigated: boolean; cells: CellState[] }
 export interface AnimalState { id: string; kind: AnimalType; name: string; fedUntil: number; progress: number; ready: boolean; health: number }
 export interface TaskState { id: string; base: number }
+export interface JobState { recipe: string; batches: number; startedAt: number; endsAt: number }
+/** A delivery contract; `availableAt` in the future means the slot is waiting for a new one. */
+export interface ContractState { id: number; items: [string, number][]; coins: number; xp: number; expiresAt: number; availableAt: number }
+export interface TradeDay { day: number; bought: Record<string, number>; sold: Record<string, number> }
 
 export interface FarmState {
   v: 1;
@@ -27,6 +31,20 @@ export interface FarmState {
   tasks: TaskState[];
   taskCursor: number;
   nextId: number;
+  /** processing job running at each facility */
+  jobs: Partial<Record<Facility, JobState>>;
+  contracts: ContractState[];
+  contractSeq: number;
+  /** today's exchange volume per crop, for daily limits */
+  trades: TradeDay;
+  /** fractional units lost to spoilage, carried until they add up to whole units */
+  spoil: Record<string, number>;
+}
+
+/** Fills in fields added after a farm was first saved. */
+export function migrate(s: FarmState): FarmState {
+  if (s.jobs && s.contracts && s.trades && s.spoil && s.contractSeq !== undefined) return s;
+  return { ...s, jobs: s.jobs ?? {}, contracts: s.contracts ?? [], contractSeq: s.contractSeq ?? 0, trades: s.trades ?? { day: 0, bought: {}, sold: {} }, spoil: s.spoil ?? {} };
 }
 
 const STAGE_GROWTH = (stage: number, jitter: number) => stage >= 3 ? 1 : Math.min(.99, STAGE_AT[stage] + jitter * (STAGE_AT[stage + 1] - STAGE_AT[stage]) * .5);
@@ -55,5 +73,6 @@ export function initialState(now: number): FarmState {
     can: 8, stats: {},
     tasks: TASKS.slice(0, 3).map(t => ({ id: t.id, base: 0 })), taskCursor: 3,
     nextId: DEMO_ANIMALS.length + 1,
+    jobs: {}, contracts: [], contractSeq: 0, trades: { day: 0, bought: {}, sold: {} }, spoil: {},
   };
 }

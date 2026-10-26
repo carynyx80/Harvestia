@@ -54,6 +54,7 @@ model Farm {
   updatedAt DateTime        @updatedAt
   inventory InventoryItem[]
   actions   ActionLog[]
+  trades    Trade[]
 
   @@index([level, coins])
 }
@@ -94,4 +95,64 @@ model Flag {
   createdAt DateTime @default(now())
 
   @@index([playerId])
+}
+
+/** Monthly real-world reference prices exactly as the provider published them. */
+model ReferencePrice {
+  commodity   String
+  /** first day of the month the average covers */
+  period      DateTime
+  value       Float
+  unit        String
+  usdPerTonne Float
+  source      String
+  fetchedAt   DateTime @default(now())
+
+  @@id([commodity, period])
+}
+
+/** Health of each reference feed: last attempt, last success, last error and rejected points. */
+model MarketFeed {
+  commodity     String    @id
+  source        String
+  lastAttemptAt DateTime?
+  lastOkAt      DateTime?
+  lastError     String?
+  rejected      Int       @default(0)
+}
+
+/** Every published in-game price, with the factors that produced it. */
+model CommodityPrice {
+  id        BigInt   @id @default(autoincrement())
+  commodity String
+  at        DateTime @default(now())
+  mid       Float
+  target    Float
+  parts     Json
+
+  @@index([commodity, at])
+}
+
+/** Virtual supply and demand: net units players sold to the exchange (decays over time). */
+model CommodityBook {
+  commodity String   @id
+  pressure  Float    @default(0)
+  updatedAt DateTime
+}
+
+/** Exchange trades, for history, statistics and audits. */
+model Trade {
+  id        BigInt   @id @default(autoincrement())
+  farmId    String
+  farm      Farm     @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  commodity String
+  side      String
+  qty       Int
+  price     Float
+  total     Int
+  fee       Int
+  at        DateTime @default(now())
+
+  @@index([commodity, at])
+  @@index([farmId, at])
 }

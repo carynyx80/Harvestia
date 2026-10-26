@@ -16,12 +16,12 @@ const BUILDABLE = new Set(['Meadow']);
 const LINKS: Record<string, [string, PanelId, string?]> = {
   house: ['Farmer profile', 'profile'], seedcrates: ['Seeds', 'inventory', 'seeds'],
   trading: ['Open shop', 'shop', 'seeds'], market: ['Player listings', 'shop', 'listings'], exchange: ['Open exchange', 'exchange'],
-  vault: ['Wallet & vault', 'wallet'], board: ['Farm tasks', 'farm'], storage: ['Inventory', 'inventory'],
+  vault: ['Wallet & vault', 'wallet'], board: ['Delivery contracts', 'contracts'], storage: ['Produce storage', 'inventory', 'storage'],
   shed: ['Equipment', 'equipment'], harvester: ['Equipment', 'equipment'], pump: ['Equipment', 'equipment'],
   barn: ['Livestock', 'livestock', 'cow'], pasture: ['Livestock', 'livestock', 'cow'], sheeppen: ['Livestock', 'livestock', 'sheep'],
   coop: ['Livestock', 'livestock', 'chicken'], pigshed: ['Livestock', 'livestock', 'pig'], feed: ['Feed', 'inventory', 'supplies'],
-  silo1: ['Inventory', 'inventory', 'crops'], silo2: ['Inventory', 'inventory', 'crops'], warehouse: ['Inventory', 'inventory'],
-  greenhouse: ['Buildings', 'shop', 'buildings'], mill: ['Inventory', 'inventory', 'goods'], dairy: ['Inventory', 'inventory', 'goods'], factory: ['Inventory', 'inventory', 'goods'],
+  silo1: ['Inventory', 'inventory', 'crops'], silo2: ['Inventory', 'inventory', 'crops'], warehouse: ['Produce storage', 'inventory', 'storage'],
+  greenhouse: ['Buildings', 'shop', 'buildings'], mill: ['Grain mill', 'processing', 'mill'], windmill: ['Grain mill', 'processing', 'mill'], dairy: ['Dairy', 'processing', 'dairy'], factory: ['Food processing', 'processing', 'factory'],
   hq: ['Cooperatives', 'coop'], cmk1: ['Cooperatives', 'coop'], cmk2: ['Cooperatives', 'coop'], sharedmill: ['Cooperatives', 'coop'],
   tower: ['Leaderboard', 'competitions'], arena: ['Competitions', 'competitions'],
 };
@@ -121,7 +121,7 @@ export function Inspector() {
       <p className="my-1.5 leading-snug">{text}</p>
       <div className="flex flex-wrap items-center gap-1.5">
         {actions}
-        {stage > 5 && <span className="inline-block border-2 border-[#2a5f61] bg-teal px-1.5 py-0.5 text-xs text-white">Playable from Stage {stage}</span>}
+        {stage > 7 && <span className="inline-block border-2 border-[#2a5f61] bg-teal px-1.5 py-0.5 text-xs text-white">Playable from Stage {stage}</span>}
       </div>
     </section>
   );

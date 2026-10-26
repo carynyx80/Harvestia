@@ -1,10 +1,11 @@
 // In-memory store for tests and local development without PostgreSQL.
 import { randomUUID } from 'node:crypto';
-import type { FarmRow, FarmTxResult, LeaderRow, PlayerRow, Store } from './types';
+import type { BookRow, FarmRow, FarmTxResult, FeedRow, LeaderRow, MarketRepo, PlayerRow, PriceRow, RefRow, Store, TradeRow } from './types';
 import type { FarmState } from '../../../shared/sim/state';
 
 export class MemoryStore implements Store {
   readonly kind = 'memory' as const;
+  readonly market = new MemoryMarket();
   private players = new Map<string, PlayerRow>();
   private sessions = new Map<string, { playerId: string; expiresAt: Date }>();
   private farms = new Map<string, FarmRow>(); // by playerId
@@ -58,4 +59,44 @@ export class MemoryStore implements Store {
     return { sessions, logs: 0 };
   }
   async close() { /* nothing to close */ }
+}
+
+/** In-memory market persistence (tests and local development). */
+export class MemoryMarket implements MarketRepo {
+  readonly refs = new Map<string, RefRow>();
+  readonly feedRows = new Map<string, FeedRow>();
+  readonly priceRows: PriceRow[] = [];
+  readonly bookRows = new Map<string, BookRow>();
+  readonly tradeRows: TradeRow[] = [];
+
+  async saveReferences(rows: RefRow[]) { for (const r of rows) this.refs.set(`${r.commodity}|${r.period.toISOString()}`, { ...r }); }
+  async references(commodity: string, since: Date) {
+    return [...this.refs.values()].filter(r => r.commodity === commodity && r.period >= since).sort((a, b) => +a.period - +b.period);
+  }
+  async saveFeed(row: FeedRow) { this.feedRows.set(row.commodity, { ...row }); }
+  async feeds() { return [...this.feedRows.values()]; }
+  async savePrices(rows: PriceRow[]) { this.priceRows.push(...rows.map(r => ({ ...r }))); }
+  async latestPrices() {
+    const latest = new Map<string, PriceRow>();
+    for (const r of this.priceRows) if (!latest.has(r.commodity) || latest.get(r.commodity)!.at <= r.at) latest.set(r.commodity, r);
+    return [...latest.values()];
+  }
+  async priceBefore(commodity: string, at: Date) {
+    return this.priceRows.filter(r => r.commodity === commodity && r.at <= at).sort((a, b) => +b.at - +a.at)[0] ?? null;
+  }
+  async prices(commodity: string, since: Date) {
+    return this.priceRows.filter(r => r.commodity === commodity && r.at >= since).sort((a, b) => +a.at - +b.at);
+  }
+  async addPressure(commodity: string, delta: number, now: Date, decay: (p: number, ms: number) => number) {
+    const b = this.bookRows.get(commodity);
+    this.bookRows.set(commodity, { commodity, pressure: (b ? decay(b.pressure, +now - +b.updatedAt) : 0) + delta, updatedAt: now });
+  }
+  async books() { return [...this.bookRows.values()]; }
+  async saveTrade(row: TradeRow) { this.tradeRows.push({ ...row }); }
+  async trades(commodity: string, limit: number) { return this.tradeRows.filter(t => t.commodity === commodity).sort((a, b) => +b.at - +a.at).slice(0, limit); }
+  async volumes(since: Date) {
+    const v: Record<string, number> = {};
+    for (const t of this.tradeRows) if (t.at >= since) v[t.commodity] = (v[t.commodity] ?? 0) + t.qty;
+    return v;
+  }
 }

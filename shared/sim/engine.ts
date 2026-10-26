@@ -5,14 +5,21 @@
 import { CROP_NAMES, PLOTS, plotCells, type CropType } from '../geometry';
 import { CATALOG_BY_ID as ITEM } from '../catalog';
 import type { Season, Weather } from '../environment';
+import { hash } from '../hash';
+import { COMMODITY_BY_ITEM, MARKET, tradeTotal, utcDay, type Quote } from '../market';
 import {
   ANIMAL_RULES, BASE_CAPACITY, BASE_STORAGE, BUILDING_CAPACITY, COINS_PER_USD, CROP_RULES, DROUGHT_DRYING, LAND_ITEMS,
   MACHINE_RULES, SEASON_GROWTH, STAGE_AT, STORAGE_UPGRADE, TASKS, UNAVAILABLE, UNIQUE_BUILDINGS, WATER_SHARE, WEATHER_GROWTH, XP,
   canCapacity, pumpFields, tractorBonus, xpForLevel, type AnimalType,
+  CONTRACT_MS, CONTRACT_PREMIUM, CONTRACT_REFILL_MS, CONTRACT_SLOTS, FACILITIES, MAX_BATCHES, PERISHABLE, RECIPE_BY_ID, RECIPES, recipeSeconds, type Facility,
 } from './rules';
-import type { AnimalState, FarmState } from './state';
+import { migrate, type AnimalState, type ContractState, type FarmState } from './state';
 
-export interface Conditions { weather: Weather; season: Season }
+export interface Conditions {
+  weather: Weather; season: Season;
+  /** exchange quotes by crop item id; trades are refused without one */
+  market?: Record<string, Quote>;
+}
 export type FarmEvent =
   | { kind: 'toast'; text: string; tone: 'good' | 'bad' | 'info' }
   | { kind: 'pop'; x: number; y: number; text: string; tone: 'good' | 'gold' | 'blue' }
@@ -50,9 +57,10 @@ function addXp(s: FarmState, xp: number, events: FarmEvent[]) {
 const bump = (s: FarmState, stat: string, n: number) => { s.stats[stat] = (s.stats[stat] ?? 0) + n; };
 
 /** Advances every timer to `now`. Long gaps (the game was closed) are simulated in one step at the given conditions. */
-export function tick(prev: FarmState, now: number, c: Conditions): FarmState {
+export function tick(prev0: FarmState, now: number, c: Conditions): FarmState {
+  const prev = migrate(prev0);
   const dtMs = now - prev.updatedAt;
-  if (dtMs <= 0) return prev;
+  if (dtMs <= 0) return refreshContracts(prev, now);
   const s = clone(prev), dt = dtMs / 1000, rate = growthRate(s, c), raining = isRaining(c);
   s.plots.forEach((p, pi) => {
     if (!p.unlocked) return;
@@ -72,8 +80,20 @@ export function tick(prev: FarmState, now: number, c: Conditions): FarmState {
     const hungrySecs = dt - fedSecs;
     a.health = Math.max(.4, Math.min(1, a.health + fedSecs / (rule.cycle * 10) - hungrySecs / (rule.cycle * 30)));
   }
+  if (!s.buildings['bld-cold']) spoil(s, dt);
   s.updatedAt = now;
-  return s;
+  return refreshContracts(s, now);
+}
+
+/** Perishables lose a share of their stock each hour without cold storage; fractions carry over. */
+function spoil(s: FarmState, dt: number) {
+  for (const [id, rate] of Object.entries(PERISHABLE)) {
+    const have = s.inventory[id] ?? 0;
+    if (have <= 0) { delete s.spoil[id]; continue; }
+    const acc = (s.spoil[id] ?? 0) + have * rate * dt / 3600, lost = Math.min(have, Math.floor(acc));
+    s.spoil[id] = acc - Math.floor(acc);
+    if (lost > 0) { s.inventory[id] = have - lost; if (!s.inventory[id]) delete s.inventory[id]; bump(s, 'spoiled', lost); }
+  }
 }
 
 // ------------------------------------------------------------------ crops
@@ -272,6 +292,7 @@ export const SELLABLE = ['crops', 'products', 'goods'];
 export function sell(prev: FarmState, itemId: string, qty: number): Result {
   const item = ITEM[itemId], have = prev.inventory[itemId] ?? 0;
   if (!item || !SELLABLE.includes(item.category)) return fail(prev, 'This item cannot be sold here');
+  if (COMMODITY_BY_ITEM[itemId]) return fail(prev, 'Crops trade at the commodity exchange');
   qty = Math.min(have, Math.max(1, Math.floor(qty)));
   if (qty <= 0) return fail(prev, 'Nothing to sell');
   const s = clone(prev), events: FarmEvent[] = [], earned = coinPrice(itemId) * qty;
@@ -321,6 +342,135 @@ export function claimTask(prev: FarmState, i: number): Result {
   s.tasks[i] = { id: next.id, base: s.stats[next.stat] ?? 0 };
   events.unshift({ kind: 'toast', text: `Task complete: +${rule.coins} coins, +${rule.xp} XP`, tone: 'good' });
   return { state: s, events };
+}
+
+// ------------------------------------------------------------------ commodity exchange
+export const tradeUsed = (s: FarmState, item: string, side: 'buy' | 'sell', now: number) =>
+  s.trades.day === utcDay(now) ? (side === 'buy' ? s.trades.bought : s.trades.sold)[item] ?? 0 : 0;
+
+/** Buys from or sells to the exchange at the server's quote; `limit` is the worst price per unit the player accepts. */
+export function trade(prev: FarmState, item: string, side: 'buy' | 'sell', qty: number, limit: number, now: number, c: Conditions): Result {
+  const com = COMMODITY_BY_ITEM[item];
+  if (!com) return fail(prev, 'Only crops trade at the exchange');
+  const q = c.market?.[item];
+  if (!q) return fail(prev, 'The exchange has no price for this crop right now — try again shortly');
+  qty = Math.floor(qty);
+  if (qty < 1 || qty > MARKET.perOrder) return fail(prev, `Orders are 1 to ${MARKET.perOrder} units`);
+  const used = tradeUsed(prev, item, side, now);
+  if (used + qty > MARKET.perDay) return fail(prev, `Daily ${side} limit for ${com.name.toLowerCase()} is ${MARKET.perDay} units (${MARKET.perDay - used} left today)`);
+  const price = side === 'buy' ? q.ask : q.bid;
+  // the price moved against the player since they looked: never fill at a worse price than they saw
+  if (side === 'buy' ? price > limit + 1e-9 : price < limit - 1e-9) return fail(prev, `The price moved to ${price.toFixed(2)} — review it and try again`);
+  const t = tradeTotal(side, qty, price);
+  const s = clone(prev), events: FarmEvent[] = [];
+  if (side === 'sell') {
+    const have = s.inventory[item] ?? 0;
+    if (have < qty) return fail(prev, `You only have ${have} ${com.name.toLowerCase()}`);
+    s.inventory[item] = have - qty; if (!s.inventory[item]) delete s.inventory[item];
+    s.coins += t.total; bump(s, 'earned', t.total);
+  } else {
+    if (prev.coins < t.total) return fail(prev, `Not enough coins — you need ${t.total.toLocaleString('en-US')}`);
+    if (storageUsed(s) + qty > storageCapacity(s)) return fail(prev, 'Not enough storage space');
+    s.inventory[item] = (s.inventory[item] ?? 0) + qty;
+    s.coins -= t.total; bump(s, 'spent', t.total);
+  }
+  if (s.trades.day !== utcDay(now)) s.trades = { day: utcDay(now), bought: {}, sold: {} };
+  const book = side === 'buy' ? s.trades.bought : s.trades.sold;
+  book[item] = (book[item] ?? 0) + qty;
+  bump(s, 'traded', qty);
+  events.push({ kind: 'toast', text: `${side === 'buy' ? 'Bought' : 'Sold'} ${qty} ${com.name.toLowerCase()} at ${price.toFixed(2)} — ${side === 'buy' ? 'paid' : 'received'} ${t.total.toLocaleString('en-US')} coins (fee ${t.fee})`, tone: 'good' });
+  return { state: s, events };
+}
+
+// ------------------------------------------------------------------ processing
+export const facilityOpen = (s: FarmState, f: Facility) => !FACILITIES[f].needs || (s.buildings[FACILITIES[f].needs!] ?? 0) > 0;
+
+export function startJob(prev: FarmState, recipeId: string, batches: number, now: number): Result {
+  const r = RECIPE_BY_ID[recipeId];
+  if (!r) return fail(prev, 'Unknown recipe');
+  const f = FACILITIES[r.facility];
+  if (!facilityOpen(prev, r.facility)) return fail(prev, `Build the ${ITEM[f.needs!].name.toLowerCase()} first`);
+  if (r.level > prev.level) return fail(prev, `${ITEM[r.output[0]].name} unlocks at level ${r.level}`);
+  if (prev.jobs[r.facility]) return fail(prev, `The ${f.name.toLowerCase()} is busy`);
+  batches = Math.floor(batches);
+  if (batches < 1 || batches > MAX_BATCHES) return fail(prev, `Run 1 to ${MAX_BATCHES} batches at a time`);
+  for (const [id, n] of Object.entries(r.inputs)) {
+    const have = prev.inventory[id] ?? 0;
+    if (have < n * batches) return fail(prev, `Needs ${n * batches} ${ITEM[id].name.toLowerCase()} (you have ${have})`);
+  }
+  const s = clone(prev);
+  for (const [id, n] of Object.entries(r.inputs)) { s.inventory[id] -= n * batches; if (!s.inventory[id]) delete s.inventory[id]; }
+  s.jobs[r.facility] = { recipe: r.id, batches, startedAt: now, endsAt: now + recipeSeconds(r, s.machines) * batches * 1000 };
+  return { state: s, events: [{ kind: 'toast', text: `${f.name}: making ${r.output[1] * batches} ${ITEM[r.output[0]].name.toLowerCase()}`, tone: 'good' }] };
+}
+
+export function collectJob(prev: FarmState, facility: Facility, now: number): Result {
+  const job = prev.jobs[facility];
+  if (!job) return fail(prev, 'Nothing is being made here');
+  if (job.endsAt > now) return fail(prev, 'Not finished yet');
+  const r = RECIPE_BY_ID[job.recipe], qty = r.output[1] * job.batches;
+  if (storageUsed(prev) + qty > storageCapacity(prev)) return fail(prev, 'Storage is full — sell or use some goods first');
+  const s = clone(prev), events: FarmEvent[] = [];
+  s.inventory[r.output[0]] = (s.inventory[r.output[0]] ?? 0) + qty;
+  delete s.jobs[facility];
+  bump(s, 'processed', qty); addXp(s, r.xp * job.batches, events);
+  events.unshift({ kind: 'toast', text: `Collected ${qty} ${ITEM[r.output[0]].name.toLowerCase()}`, tone: 'good' });
+  return { state: s, events };
+}
+
+// ------------------------------------------------------------------ delivery contracts
+/** Items a contract may ask for at this level: unlocked crops, animal products and goods the farm can make. */
+export function contractPool(level: number) {
+  const crops = Object.entries(CROP_RULES).filter(([, r]) => r.level <= level).map(([c]) => `crop-${c}`);
+  const goods = RECIPES.filter(r => r.level <= level).map(r => r.output[0]);
+  return [...crops, 'prod-egg', 'prod-milk', 'prod-wool', ...goods];
+}
+
+/** The contract with this sequence number, deterministic so client and server agree. Pays a fixed premium over base value. */
+export function makeContract(seq: number, level: number, now: number): ContractState {
+  const pool = contractPool(level), lines = hash(seq, 1, 91) < .45 ? 2 : 1, items: [string, number][] = [];
+  for (let k = 0; items.length < lines && k < 8; k++) {
+    const id = pool[Math.floor(hash(seq, k, 92) * pool.length)];
+    if (items.some(([x]) => x === id)) continue;
+    const target = (40 + level * 25) * (.7 + hash(seq, k, 93) * .6);
+    items.push([id, Math.max(2, Math.round(target / coinPrice(id)))]);
+  }
+  const value = items.reduce((v, [id, n]) => v + coinPrice(id) * n, 0);
+  return { id: seq, items, coins: Math.round(value * CONTRACT_PREMIUM), xp: 5 + Math.round(value / 12), expiresAt: now + CONTRACT_MS, availableAt: now };
+}
+
+/** Fills empty slots, replaces expired contracts and opens waiting slots whose time has come. Returns `s` unchanged when nothing changes. */
+function refreshContracts(s: FarmState, now: number): FarmState {
+  const due = (k: number) => { const c = s.contracts[k]; return !c || (c.items.length ? c.expiresAt <= now : c.availableAt <= now); };
+  if (![...Array(CONTRACT_SLOTS).keys()].some(due)) return s;
+  const n = { ...s, contracts: [...s.contracts] };
+  for (let k = 0; k < CONTRACT_SLOTS; k++) {
+    const c = n.contracts[k];
+    if (!c || (c.items.length ? c.expiresAt <= now : c.availableAt <= now)) n.contracts[k] = makeContract(++n.contractSeq, n.level, now);
+  }
+  return n;
+}
+
+export function deliverContract(prev: FarmState, index: number, now: number): Result {
+  const c = prev.contracts[index];
+  if (!c || !c.items.length) return fail(prev, 'No contract here yet');
+  if (c.expiresAt <= now) return fail(prev, 'This contract has expired');
+  const missing = c.items.filter(([id, n]) => (prev.inventory[id] ?? 0) < n);
+  if (missing.length) return fail(prev, `Still need ${missing.map(([id, n]) => `${n - (prev.inventory[id] ?? 0)} ${ITEM[id].name.toLowerCase()}`).join(' and ')}`);
+  const s = clone(prev), events: FarmEvent[] = [];
+  for (const [id, n] of c.items) { s.inventory[id] -= n; if (!s.inventory[id]) delete s.inventory[id]; }
+  s.coins += c.coins; bump(s, 'earned', c.coins); bump(s, 'contracts', 1); addXp(s, c.xp, events);
+  s.contracts[index] = { ...c, items: [], availableAt: now + CONTRACT_REFILL_MS };
+  events.unshift({ kind: 'toast', text: `Contract delivered: +${c.coins.toLocaleString('en-US')} coins, +${c.xp} XP`, tone: 'good' });
+  return { state: s, events };
+}
+
+export function skipContract(prev: FarmState, index: number, now: number): Result {
+  const c = prev.contracts[index];
+  if (!c || !c.items.length) return fail(prev, 'No contract here to skip');
+  const s = clone(prev);
+  s.contracts[index] = { ...c, items: [], availableAt: now + CONTRACT_REFILL_MS };
+  return { state: s, events: [{ kind: 'toast', text: 'Contract declined — a new one arrives in 10 minutes', tone: 'info' }] };
 }
 
 export type { AnimalState };

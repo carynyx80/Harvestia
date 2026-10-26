@@ -16,6 +16,7 @@ const ART: Record<string, () => void> = {
   'animal-chicken': () => HV.chicken(0, 0, 0), 'animal-sheep': () => HV.sheep(0, 0, 0), 'animal-pig': () => HV.pig(0, 0, 0), 'animal-cow': () => HV.cow(0, 0, 0),
   'bld-coop': () => HV.coop(0, 0), 'bld-shelter': () => HV.shelter(0, 0), 'bld-silo': () => HV.silo(0, 0), 'bld-greenhouse': () => HV.greenhouse(0, 0),
   'bld-barn': () => HV.barn(0, 0), 'bld-dairy': () => HV.dairy(0, 0),
+  'bld-cold': () => { HV.R(1, 3, 14, 12, '#dfe9f0'); HV.R(1, 3, 14, 2, '#9fb7c8'); HV.R(5, 7, 6, 8, '#9fb7c8'); HV.R(6, 8, 4, 7, '#c9dbe6'); HV.P(9, 11, '#5e6670'); HV.R(2, 6, 2, 2, '#86ccf2'); HV.R(12, 6, 2, 2, '#86ccf2'); },
   'land-plot': () => { HV.R(1, 3, 14, 11, '#7a4a2a'); for (let y = 5; y < 13; y += 3) HV.R(2, y, 12, 1, '#5a3420'); HV.sign(8, 14, '#e8c35a'); },
   'land-irrigation': () => { HV.R(1, 4, 14, 9, '#59b049'); HV.R(1, 7, 14, 3, '#3d8fd6'); HV.R(1, 7, 14, 1, '#86ccf2'); },
   'land-fertile': () => { HV.R(1, 3, 14, 11, '#5a3420'); for (let i = 0; i < 10; i++) HV.P(2 + (i * 7) % 12, 4 + (i * 5) % 9, '#9c6a3e'); HV.crop('wheat', 2, 8, 12); },
@@ -28,6 +29,8 @@ const ART: Record<string, () => void> = {
   'prod-egg': ItemArt.egg, 'prod-milk': ItemArt.milk, 'prod-wool': ItemArt.wool, 'prod-truffle': ItemArt.truffle,
   'good-flour': ItemArt.flour, 'good-cheese': ItemArt.cheese, 'good-butter': ItemArt.butter, 'good-chocolate': ItemArt.chocolate,
   'good-coffee': ItemArt.coffeeBag, 'good-sauce': ItemArt.sauce,
+  'good-cornmeal': () => { HV.sack(8, 15); HV.R(6, 10, 4, 2, '#f2c94c'); HV.P(7, 7, '#e8b93c'); HV.P(9, 8, '#e8b93c'); },
+  'good-soyoil': () => { HV.E(8, 15, 4, 1, 'rgba(22,46,18,.3)'); HV.R(5, 5, 6, 10, '#e8c35a'); HV.R(6, 3, 4, 2, '#d9cfa8'); HV.R(7, 2, 2, 1, '#3f8f3a'); HV.R(5, 5, 1, 10, '#fff0a8'); HV.R(6, 9, 4, 3, '#f4e4bc'); HV.P(7, 10, '#7cc24c'); },
 };
 
 export const ITEMS: Item[] = CATALOG.map(c => ({ ...c, art: ART[c.id] ?? (() => HV.crate(4, 4)) }));

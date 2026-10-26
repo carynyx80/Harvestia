@@ -10,13 +10,18 @@ import { SpeedGuard, readFarm, runAction } from './farm';
 import { Jobs } from './jobs';
 import { LiveHub } from './live';
 import { MemoryStore } from './store/memory';
+import { MarketService } from './market/service';
+import { imfViaFred, type ReferenceProvider } from './market/providers';
+import { COMMODITY_BY_KEY } from '../../shared/market';
 import type { Store } from './store/types';
 import { initialState } from '../../shared/sim/state';
 import { worldAt } from '../../shared/world';
 
-export const GAME_STAGE = 6;
+export const GAME_STAGE = 7;
 
-export interface AppOptions { store?: Store; redisUrl?: string; runJobs?: boolean }
+declare module 'fastify' { interface FastifyInstance { market: MarketService } }
+
+export interface AppOptions { store?: Store; redisUrl?: string; runJobs?: boolean; provider?: ReferenceProvider | null }
 
 async function defaultStore(): Promise<Store> {
   if (config.databaseUrl) { const { PrismaStore } = await import('./store/prisma'); return new PrismaStore(); }
@@ -34,9 +39,12 @@ export async function buildApp(opts: AppOptions = {}) {
   const store = opts.store ?? await defaultStore();
   const redisUrl = 'redisUrl' in opts ? opts.redisUrl : config.redisUrl;
   const live = new LiveHub(redisUrl);
-  const jobs = new Jobs(store, redisUrl, opts.runJobs ?? config.worker, (msg, extra) => app.log.info({ extra }, msg));
+  const provider = 'provider' in opts ? opts.provider! : config.marketProvider === 'off' ? null : imfViaFred;
+  const market = new MarketService(store.market, provider, (msg, extra) => app.log.warn({ extra }, msg));
+  const jobs = new Jobs(store, redisUrl, opts.runJobs ?? config.worker, (msg, extra) => app.log.info({ extra }, msg), market, at => live.market(at));
   const speed = new SpeedGuard(15, (playerId, detail) => { void store.flag(playerId, 'too-fast', detail); app.log.warn({ playerId, detail }, 'flagged: too fast'); });
   const auth = requirePlayer(store);
+  app.decorate('market', market);
   app.addHook('onClose', async () => { await live.close(); await jobs.close(); await store.close(); });
 
   await app.register(cors, {
@@ -65,8 +73,24 @@ export async function buildApp(opts: AppOptions = {}) {
     database: store.kind,
     queue: jobs.mode,
     online: live.online,
-    features: { accounts: true, farmState: true, liveChannel: true, commodityFeeds: false, wallet: false },
+    features: { accounts: true, farmState: true, liveChannel: true, commodityFeeds: !!provider, exchange: true, processing: true, contracts: true, wallet: false },
+    market: { provider: provider?.name ?? null, publishedAt: market.snapshot?.updatedAt ?? null, feeds: market.snapshot?.commodities.filter(c => c.ref).map(c => ({ key: c.key, status: c.ref!.status, period: c.ref!.period })) ?? [] },
   }));
+
+  // ---------------------------------------------------------------- market
+  /** Every commodity's reference price (with source and timestamps), in-game price, quotes and the pricing breakdown. */
+  app.get('/v1/market', async (_req, reply) => {
+    const snap = market.snapshot ?? await market.reload();
+    reply.header('cache-control', 'public, max-age=15');
+    return snap;
+  });
+
+  app.get<{ Params: { key: string }; Querystring: { days?: string } }>('/v1/market/:key/history', async (req, reply) => {
+    if (!Object.hasOwn(COMMODITY_BY_KEY, req.params.key)) return reply.code(404).send({ error: 'Unknown commodity' });
+    const days = Math.min(30, Math.max(1, Number(req.query.days) || 7));
+    reply.header('cache-control', 'public, max-age=30');
+    return market.history(req.params.key, days);
+  });
 
   /** The shared world clock as the server sees it; clients use serverTime to correct their own clocks. */
   app.get('/v1/world', async () => { const now = Date.now(); return { serverTime: now, world: worldAt(now) }; });
@@ -98,8 +122,12 @@ export async function buildApp(opts: AppOptions = {}) {
     const now = Date.now(), playerId = req.player!.id;
     if (speed.tooFast(playerId, now)) return reply.code(429).send({ ok: false, error: 'Too many actions at once — slow down a little' });
     const body = (req.body ?? {}) as Record<string, unknown>;
-    const out = await runAction(store, playerId, body.seq, body.action, now);
+    const out = await runAction(store, playerId, body.seq, body.action, now, market);
     if (out.activity) live.activity(out.activity);
+    if (out.trade) {
+      const t = out.trade;
+      await market.recordTrade(t.farmId, t.item, t.side, t.qty, t.price, t.total, t.fee, now).catch(e => app.log.error({ err: e }, 'trade record failed'));
+    }
     return reply.code(out.status).send({ ...out.body, serverTime: now });
   });
 

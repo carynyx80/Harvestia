@@ -3,6 +3,7 @@ import type { FarmAction } from '../../shared/sim/actions';
 import type { FarmEvent } from '../../shared/sim/engine';
 import type { FarmState } from '../../shared/sim/state';
 import type { WorldState } from '../../shared/world';
+import type { MarketSnapshot } from '../../shared/market';
 
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'https://harvestia-api.up.railway.app').replace(/\/$/, '');
 
@@ -41,6 +42,14 @@ export const getFarm = (token: string) => call<FarmResponse>('/v1/farm', { token
 export const postAction = (token: string, seq: number, action: FarmAction) => call<ActionResponse>('/v1/farm/actions', { method: 'POST', token, body: JSON.stringify({ seq, action }) });
 export const resetFarm = (token: string) => call<{ ok: boolean; state: FarmState; lastSeq: number; serverTime: number }>('/v1/farm/reset', { method: 'POST', token, body: '{}' });
 export const getLeaderboard = () => call<{ updatedAt: number; rows: LeaderRow[] }>('/v1/leaderboard');
+export const getMarket = () => call<MarketSnapshot>('/v1/market');
+export interface MarketHistory {
+  key: string;
+  prices: { at: number; mid: number }[];
+  reference: { period: string; value: number; usdPerTonne: number }[];
+  trades: { side: 'buy' | 'sell'; qty: number; price: number; at: number }[];
+}
+export const getMarketHistory = (key: string, days = 7) => call<MarketHistory>(`/v1/market/${encodeURIComponent(key)}/history?days=${days}`);
 
 /** Opens the live channel; reconnects with backoff until `close()` is called. */
 export function openLive(token: string, onMessage: (m: { type: string; online?: number; text?: string; at?: number; recent?: { text: string; at: number }[] }) => void) {

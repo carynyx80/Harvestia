@@ -6,6 +6,7 @@ import type { FarmState } from '@/game/sim/state';
 import type { Conditions, FarmEvent } from '@/game/sim/engine';
 import { applyAction, type FarmAction } from '../../shared/sim/actions';
 import { worldAt } from '../../shared/world';
+import { quoteFor, type MarketSnapshot } from '../../shared/market';
 
 export type Tool = 'plant' | 'water' | 'harvest' | 'build' | 'upgrade' | 'inventory';
 export type AnimalKind = 'cow' | 'sheep' | 'pig' | 'chicken' | 'duck';
@@ -20,7 +21,7 @@ export type Selection =
 /** HUD → world environment request (any subset); `n` makes repeats distinct. */
 export interface EnvCommand { n: number; hour?: number; season?: Season; weather?: Weather; speed?: number; live?: boolean }
 
-export type PanelId = 'inventory' | 'shop' | 'profile' | 'farm' | 'equipment' | 'livestock' | 'exchange' | 'wallet' | 'coop' | 'competitions';
+export type PanelId = 'inventory' | 'shop' | 'profile' | 'farm' | 'equipment' | 'livestock' | 'exchange' | 'processing' | 'contracts' | 'wallet' | 'coop' | 'competitions';
 export interface OpenPanel { id: PanelId; tab?: string }
 
 export interface Toast { id: number; text: string; tone: 'good' | 'bad' | 'info' | 'level' }
@@ -60,6 +61,8 @@ interface GameState {
   /** server clock minus local clock, in ms */
   serverOffset: number;
   live: { online: number; feed: { text: string; at: number }[] };
+  /** latest published prices from the server (null until loaded or when unreachable) */
+  market: MarketSnapshot | null;
   /** Applies an action locally for instant feedback and sends it to the server; false (with a reason shown) when refused. */
   act(action: FarmAction): boolean;
   /** Conditions of the shared world clock (what the rules use), whatever the preview panel shows. */
@@ -116,8 +119,13 @@ export const useGame = create<GameState>((set, get) => ({
   session: null,
   serverOffset: 0,
   live: { online: 0, feed: [] },
+  market: null,
   setFarm: farm => set({ farm }),
-  conditions: () => { const w = worldAt(Date.now() + get().serverOffset); return { weather: w.weather, season: w.season }; },
+  conditions: () => {
+    const w = worldAt(Date.now() + get().serverOffset), m = get().market;
+    const market = m ? Object.fromEntries(m.commodities.filter(c => c.price).map(c => [c.item, quoteFor(c.price!.mid, c.price!.at)])) : undefined;
+    return { weather: w.weather, season: w.season, market };
+  },
   act: action => {
     const farm = get().farm;
     if (!farm) return false;

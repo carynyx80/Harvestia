@@ -6,7 +6,16 @@
 
 Harvestia is a browser-based pixel-art farming game with an agricultural economy referenced to real commodity markets and a $HRV token economy (Robinhood Chain first, BNB Chain later).
 
-## Current stage: 6 — Backend
+## Current stage: 7 — Commodity economy
+
+- **Real market data:** the API pulls the IMF Primary Commodity Prices (monthly averages, served by FRED) for wheat, corn, soybeans, coffee and cocoa every 6 hours. Each value is normalised to USD per tonne and checked against a plausible range, rejected if it moves more than 50% in a month or is dated in the future, and stored with its source, period and fetch time. A feed that can't be reached is marked as an outage and the last valid value is kept. A reference older than 75 days is marked stale and stops moving prices. Tomatoes, potatoes and rice have no reference market and say so.
+- **Virtual pricing:** every 15 minutes the server sets each crop's price as base value × real-market factor (latest reference ÷ its 24-month average, capped to 0.75–1.35) × player supply and demand (capped ±15%, fading by half every 6 hours) × season × grade × balancing. Each update moves at most ±3%, and never more than ±15% from the price a day earlier. The exchange window shows the whole breakdown.
+- **Commodity exchange:** crops are bought from and sold to the exchange at the server's bid/ask (±3% spread) with a 1% fee, up to 200 units per order and 600 per crop and side per day. Every order carries the price the player saw, and the server refuses to fill at a worse one. Trades are recorded and feed back into supply and demand. Animal products and goods still sell at the general store's fixed price.
+- **Produce storage:** one shared capacity (warehouse, upgrades, silos). Eggs, milk and tomatoes spoil a few percent per hour on the server clock unless the farm builds cold storage.
+- **Processing:** the grain mill, dairy and food-processing plant run timed jobs (flour, cornmeal, cheese, butter, tomato sauce, soybean oil, roasted coffee, chocolate). Inputs are taken at the start, and goods are worth about 25–50% more than their ingredients.
+- **Delivery contracts:** three contracts at a time, generated deterministically by level. They pay a fixed 30% premium over the goods' base value — never a live price, so payouts stay bounded — and expire after 2 hours.
+
+### Stage 6 — Backend
 
 Every farm now lives on the server:
 
@@ -103,7 +112,7 @@ The Stage 1 concept and art-direction sheet stay available at `/concept/index.ht
 | Database: PostgreSQL (Prisma) | Railway | `server/prisma/` |
 | Queue, cache, pub/sub: Redis (BullMQ) | Railway | `server/src/jobs.ts`, `server/src/live.ts` |
 
-API routes: `GET /health`, `GET /v1/status`, `GET /v1/world`, `POST /v1/auth/guest`, `GET /v1/me`, `GET /v1/farm`, `POST /v1/farm/actions`, `POST /v1/farm/reset`, `GET /v1/leaderboard`, `GET /v1/farms/:id`, and the WebSocket `/v1/live`. CORS only allows the Vercel site, its preview deployments and local dev.
+API routes: `GET /health`, `GET /v1/status`, `GET /v1/world`, `POST /v1/auth/guest`, `GET /v1/me`, `GET /v1/farm`, `POST /v1/farm/actions`, `POST /v1/farm/reset`, `GET /v1/leaderboard`, `GET /v1/farms/:id`, `GET /v1/market`, `GET /v1/market/:key/history`, and the WebSocket `/v1/live`. CORS only allows the Vercel site, its preview deployments and local dev.
 
 ## Develop
 
@@ -132,8 +141,8 @@ Development is stage-gated; each stage ships only after explicit approval.
 3. Animation polish ✓
 4. Game UI ✓
 5. Core gameplay ✓
-6. Backend ← current
-7. Commodity economy
+6. Backend ✓
+7. Commodity economy ← current
 8. Blockchain
 9. Buybacks and rewards
 10. Multiplayer and competitions

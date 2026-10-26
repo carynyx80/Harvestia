@@ -142,12 +142,13 @@ describe('economy', () => {
     expect(plant(r.state, LOCKED, 0, 'seed-wheat', T0).error).toBeUndefined();
   });
 
-  it('sells produce for coins', () => {
-    const s = farm(), have = s.inventory['crop-wheat'];
-    const r = sell(s, 'crop-wheat', 10);
+  it('sells animal products and goods for coins; crops go to the exchange', () => {
+    const s = farm(), have = s.inventory['prod-egg'];
+    const r = sell(s, 'prod-egg', 10);
     expect(r.state.coins).toBe(s.coins + 10 * 8);
-    expect(r.state.inventory['crop-wheat']).toBe(have - 10);
+    expect(r.state.inventory['prod-egg']).toBe(have - 10);
     expect(sell(s, 'seed-wheat', 1).error).toBeTruthy();
+    expect(sell(s, 'crop-wheat', 1).error).toMatch(/exchange/);
   });
 
   it('upgrades machines for coins', () => {
@@ -195,5 +196,96 @@ describe('actions and world clock', async () => {
     const later = worldAt(T0 + 300_000 * 7);
     expect(later.day).toBe(a.day + 7);
     expect(later.season).not.toBe(a.season);
+  });
+});
+
+describe('stage 7 economy', async () => {
+  const { trade, startJob, collectJob, deliverContract, skipContract, makeContract } = await import('./engine');
+  const { parseAction } = await import('./actions');
+  const { MARKET, quoteFor, nextPrice, targetPrice, COMMODITY_BY_KEY, tradeTotal } = await import('../market');
+  const { CONTRACT_SLOTS, CONTRACT_MS, PERISHABLE, RECIPE_BY_ID } = await import('./rules');
+  const market = { 'crop-wheat': quoteFor(10, T0) };
+  const C = { ...SUNNY, market };
+
+  it('sells to the exchange at the bid with a fee, and respects the price limit', () => {
+    const s = farm(), q = market['crop-wheat'];
+    const r = trade(s, 'crop-wheat', 'sell', 10, q.bid, T0, C);
+    expect(r.error).toBeUndefined();
+    expect(r.state.coins).toBe(s.coins + tradeTotal('sell', 10, q.bid).total);
+    expect(r.state.inventory['crop-wheat']).toBe(s.inventory['crop-wheat'] - 10);
+    expect(r.state.trades.sold['crop-wheat']).toBe(10);
+    // asked for more than the bid: refused rather than filled worse
+    expect(trade(s, 'crop-wheat', 'sell', 10, q.bid + .5, T0, C).error).toMatch(/price moved/);
+    expect(trade(s, 'crop-wheat', 'sell', 10, q.bid, T0, SUNNY).error).toMatch(/no price/);
+    expect(trade(s, 'prod-egg', 'sell', 1, 1, T0, C).error).toBeTruthy();
+  });
+
+  it('buys at the ask and enforces per-order and daily limits', () => {
+    const f = farm(), s: FarmState = { ...f, coins: 1e6, machines: { ...f.machines, 'mach-storage': 5 } }, q = market['crop-wheat'];
+    const r = trade(s, 'crop-wheat', 'buy', 5, q.ask, T0, C);
+    expect(r.state.coins).toBe(1e6 - tradeTotal('buy', 5, q.ask).total);
+    expect(trade(s, 'crop-wheat', 'buy', MARKET.perOrder + 1, q.ask, T0, C).error).toMatch(/Orders/);
+    let t = s;
+    for (let k = 0; k < MARKET.perDay / MARKET.perOrder; k++) t = trade(t, 'crop-wheat', 'buy', MARKET.perOrder, q.ask, T0, C).state;
+    expect(trade(t, 'crop-wheat', 'buy', 1, q.ask, T0, C).error).toMatch(/Daily/);
+    // a new UTC day resets the limit
+    expect(trade(t, 'crop-wheat', 'buy', 1, q.ask, T0 + 86_400_000, C).error).toBeUndefined();
+  });
+
+  it('bounds the published price', () => {
+    expect(nextPrice(10, null, 20)).toBe(10.3);
+    expect(nextPrice(10, null, 5)).toBe(9.7);
+    expect(nextPrice(10, 8, 20)).toBe(9.2); // capped by the 24h band
+    const huge = targetPrice(COMMODITY_BY_KEY.wheat, { refRatio: 5, pressure: -1e9, season: 'spring' });
+    expect(huge.parts.find(p => p.key === 'reference')!.value).toBe(MARKET.refBounds[1]);
+    expect(huge.parts.find(p => p.key === 'demand')!.value).toBe(MARKET.demandBounds[1]);
+  });
+
+  it('processes goods on a server timer', () => {
+    const s = farm(), r = RECIPE_BY_ID.flour;
+    const started = startJob(s, 'flour', 2, T0);
+    expect(started.error).toBeUndefined();
+    expect(started.state.inventory['crop-wheat']).toBe(s.inventory['crop-wheat'] - 6);
+    expect(startJob(started.state, 'cornmeal', 1, T0).error).toMatch(/busy/);
+    expect(collectJob(started.state, 'mill', T0 + 1000).error).toMatch(/Not finished/);
+    const done = collectJob(started.state, 'mill', T0 + r.seconds * 2 * 1000);
+    expect(done.state.inventory['good-flour']).toBe(s.inventory['good-flour'] + 4);
+    expect(done.state.jobs.mill).toBeUndefined();
+    expect(startJob(s, 'chocolate', 1, T0).error).toMatch(/level/);
+    expect(startJob(s, 'flour', 999, T0).error).toBeTruthy();
+  });
+
+  it('spoils perishables without cold storage', () => {
+    const s = farm(), eggs = s.inventory['prod-egg'];
+    const later = tick(s, T0 + 3600_000, SUNNY);
+    expect(later.inventory['prod-egg']).toBe(eggs - Math.floor(eggs * PERISHABLE['prod-egg']));
+    const cold = tick({ ...s, buildings: { ...s.buildings, 'bld-cold': 1 } }, T0 + 3600_000, SUNNY);
+    expect(cold.inventory['prod-egg']).toBe(eggs);
+  });
+
+  it('offers deterministic contracts that pay a fixed premium', () => {
+    const s = tick(farm(), T0 + 1, SUNNY);
+    expect(s.contracts).toHaveLength(CONTRACT_SLOTS);
+    expect(makeContract(5, 3, T0)).toEqual(makeContract(5, 3, T0));
+    const c = { ...makeContract(99, 3, T0), items: [['prod-egg', 4]] as [string, number][], coins: 50 };
+    const withC = { ...s, contracts: [c, ...s.contracts.slice(1)] };
+    const r = deliverContract(withC, 0, T0 + 10);
+    expect(r.error).toBeUndefined();
+    expect(r.state.coins).toBe(s.coins + 50);
+    expect(r.state.contracts[0].items).toHaveLength(0);
+    expect(deliverContract(withC, 0, T0 + CONTRACT_MS + 1).error).toMatch(/expired/);
+    expect(skipContract(withC, 1, T0).state.contracts[1].items).toHaveLength(0);
+    // an expired contract is replaced on the next tick
+    expect(tick(withC, T0 + CONTRACT_MS + 1, SUNNY).contracts[0].id).not.toBe(99);
+  });
+
+  it('rejects malformed economy actions, including inherited property names', () => {
+    expect(parseAction({ type: 'trade', item: 'crop-wheat', side: 'sell', qty: 5, limit: 9.7 })).toBeTruthy();
+    expect(parseAction({ type: 'trade', item: 'crop-wheat', side: 'sell', qty: 5, limit: -1 })).toBeNull();
+    expect(parseAction({ type: 'trade', item: 'crop-wheat', side: 'gift', qty: 5, limit: 1 })).toBeNull();
+    expect(parseAction({ type: 'process', recipe: 'toString', batches: 1 })).toBeNull();
+    expect(parseAction({ type: 'collectJob', facility: 'constructor' })).toBeNull();
+    expect(parseAction({ type: 'buy', item: '__proto__', qty: 1 })).toBeNull();
+    expect(parseAction({ type: 'deliver', index: 7 })).toBeNull();
   });
 });

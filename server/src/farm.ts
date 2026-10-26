@@ -5,7 +5,9 @@ import { tick, type FarmEvent } from '../../shared/sim/engine';
 import { applyAction, parseAction } from '../../shared/sim/actions';
 import type { FarmState } from '../../shared/sim/state';
 import { worldAt } from '../../shared/world';
+import { tradeTotal } from '../../shared/market';
 import type { Store } from './store/types';
+import type { MarketService } from './market/service';
 
 export const conditionsAt = (now: number) => { const w = worldAt(now); return { weather: w.weather, season: w.season }; };
 
@@ -21,10 +23,12 @@ export interface ActionOutcome {
   body: { ok: boolean; state?: FarmState; events?: FarmEvent[]; error?: string; lastSeq?: number; duplicate?: boolean };
   /** set when the action is worth telling the village about */
   activity?: string;
+  /** a filled exchange trade, to record and feed into supply/demand */
+  trade?: { farmId: string; item: string; side: 'buy' | 'sell'; qty: number; price: number; total: number; fee: number };
 }
 
 /** Applies one client action. `seq` must be higher than any applied before (stops replays and double-sends). */
-export async function runAction(store: Store, playerId: string, seq: unknown, raw: unknown, now: number): Promise<ActionOutcome> {
+export async function runAction(store: Store, playerId: string, seq: unknown, raw: unknown, now: number, market?: MarketService): Promise<ActionOutcome> {
   const action = parseAction(raw);
   if (!action) return { status: 400, body: { ok: false, error: 'Invalid action' } };
   if (typeof seq !== 'number' || !Number.isInteger(seq) || seq < 1 || seq > 2 ** 31 - 1) return { status: 400, body: { ok: false, error: 'Invalid sequence number' } };
@@ -34,13 +38,18 @@ export async function runAction(store: Store, playerId: string, seq: unknown, ra
       // already applied (a retry) or replayed: return the authoritative state without re-applying
       return { value: { status: 409, body: { ok: false, duplicate: true, error: 'Action already processed', state: farm.state, lastSeq: farm.lastSeq } } };
     }
-    const c = conditionsAt(now);
+    const c = { ...conditionsAt(now), market: market?.quotes() };
     const ticked = tick(farm.state, now, c);
     const r = applyAction(ticked, action, now, c);
+    let trade: ActionOutcome['trade'];
+    if (!r.error && action.type === 'trade') {
+      const q = c.market![action.item], price = action.side === 'buy' ? q.ask : q.bid, t = tradeTotal(action.side, action.qty, price);
+      trade = { farmId: farm.id, item: action.item, side: action.side, qty: action.qty, price, total: t.total, fee: t.fee };
+    }
     return {
       next: { ...farm, state: r.state, lastSeq: seq },
       log: { seq, type: action.type, payload: action, ok: !r.error, error: r.error },
-      value: { status: 200, body: { ok: !r.error, state: r.state, events: r.events, error: r.error, lastSeq: seq }, activity: r.error ? undefined : describe(farm.name, r.events, ticked, r.state) },
+      value: { status: 200, body: { ok: !r.error, state: r.state, events: r.events, error: r.error, lastSeq: seq }, activity: r.error ? undefined : describe(farm.name, r.events, ticked, r.state), trade },
     };
   });
 }
@@ -52,6 +61,7 @@ function describe(name: string, events: FarmEvent[], before: FarmState, after: F
   if (harvested >= 10) return `${name} harvested ${harvested} crops`;
   if (after.animals.length > before.animals.length) return `${name} welcomed a new ${after.animals[after.animals.length - 1].kind}`;
   if (after.plots.filter(p => p.unlocked).length > before.plots.filter(p => p.unlocked).length) return `${name} bought new land`;
+  if ((after.stats.contracts ?? 0) > (before.stats.contracts ?? 0)) return `${name} delivered a contract for ${(after.coins - before.coins).toLocaleString('en-US')} coins`;
   void events;
   return undefined;
 }

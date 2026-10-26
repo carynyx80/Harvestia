@@ -31,7 +31,7 @@ export const CROP_INFO: [CropType, number, number, string][] = [
 
 export const CATALOG: CatalogItem[] = [
   ...CROP_INFO.map(([c, usd, hours, note]): CatalogItem => ({ id: `seed-${c}`, name: `${CROP_NAMES[c]} seeds`, category: 'seeds', usd, desc: `${note} Ready in about ${hours} game-hours.` })),
-  ...CROP_INFO.map(([c, usd]): CatalogItem => ({ id: `crop-${c}`, name: CROP_NAMES[c], category: 'crops', usd: +(usd * 1.6).toFixed(2), desc: `Harvested ${CROP_NAMES[c].toLowerCase()}. Store it, process it or sell it at the exchange.` })),
+  ...CROP_INFO.map(([c, usd]): CatalogItem => ({ id: `crop-${c}`, name: CROP_NAMES[c], category: 'crops', usd: +(usd * 1.6).toFixed(2), desc: `Harvested ${CROP_NAMES[c].toLowerCase()}. Store it, process it or trade it at the commodity exchange.` })),
 
   { id: 'feed-chicken', name: 'Chicken feed', category: 'feed', usd: .10, desc: 'Grain mix. One bag feeds a hen for several laying cycles.' },
   { id: 'feed-sheep', name: 'Sheep feed', category: 'feed', usd: .25, desc: 'Hay pellets for a healthy fleece.' },
@@ -48,6 +48,7 @@ export const CATALOG: CatalogItem[] = [
   { id: 'bld-silo', name: 'Grain silo', category: 'buildings', usd: 3.00, thumb: true, desc: 'Bulk crop storage.', effect: '+200 storage' },
   { id: 'bld-greenhouse', name: 'Greenhouse', category: 'buildings', usd: 4.00, thumb: true, desc: 'Weather-proof growing.', effect: 'Ignores drought and storms' },
   { id: 'bld-barn', name: 'Cow barn', category: 'buildings', usd: 6.00, thumb: true, desc: 'Shelter for 6 more cows.', effect: '+6 cow capacity' },
+  { id: 'bld-cold', name: 'Cold storage', category: 'buildings', usd: 5.00, desc: 'Refrigerated room in the produce warehouse.', effect: 'Eggs, milk and tomatoes stop spoiling' },
   { id: 'bld-dairy', name: 'Dairy', category: 'buildings', usd: 7.00, thumb: true, desc: 'Turns milk into cheese and butter.', effect: 'Unlocks dairy recipes' },
 
   { id: 'land-plot', name: 'Expansion plot', category: 'land', usd: 2.00, desc: 'Unlocks one 60×44 field.', effect: '+1 field' },
@@ -70,11 +71,13 @@ export const CATALOG: CatalogItem[] = [
   { id: 'prod-truffle', name: 'Truffles', category: 'products', usd: .60, desc: 'Found by happy pigs.' },
 
   { id: 'good-flour', name: 'Flour', category: 'goods', usd: .18, desc: 'Milled wheat.' },
+  { id: 'good-cornmeal', name: 'Cornmeal', category: 'goods', usd: .26, desc: 'Stone-ground corn from the mill.' },
+  { id: 'good-soyoil', name: 'Soybean oil', category: 'goods', usd: .65, desc: 'Pressed at food processing.' },
   { id: 'good-cheese', name: 'Cheese', category: 'goods', usd: .55, desc: 'Aged at the dairy.' },
-  { id: 'good-butter', name: 'Butter', category: 'goods', usd: .40, desc: 'Churned at the dairy.' },
+  { id: 'good-butter', name: 'Butter', category: 'goods', usd: .50, desc: 'Churned at the dairy.' },
   { id: 'good-chocolate', name: 'Chocolate', category: 'goods', usd: 1.20, desc: 'Made from cocoa at food processing.' },
   { id: 'good-coffee', name: 'Roasted coffee', category: 'goods', usd: .90, desc: 'Roasted beans in a jute bag.' },
-  { id: 'good-sauce', name: 'Tomato sauce', category: 'goods', usd: .35, desc: 'Jarred at food processing.' },
+  { id: 'good-sauce', name: 'Tomato sauce', category: 'goods', usd: .65, desc: 'Jarred at food processing.' },
 ];
 
 export const CATALOG_BY_ID: Record<string, CatalogItem> = Object.fromEntries(CATALOG.map(i => [i.id, i]));

@@ -108,27 +108,27 @@ export function buildLayout(terrain: TerrainResult): WorldLayout {
 
   // ---- Industry
   add(186, () => HV.windmillTower(430, 186)); reserve(412, 120, 36, 70);
-  spot({ id: 'windmill', x: 412, y: 112, w: 38, h: 74, name: 'Windmill', zone: 'Industry', play: 'Grinds wheat into flour. The blades turn while a job is running.', stage: 7 });
-  bld('mill', 462, 122, 50, 54, () => HV.mill(462, 122), { name: 'Grain Mill', zone: 'Industry', play: 'Processing: wheat → flour, corn → meal, as queued jobs.', stage: 7 });
+  spot({ id: 'windmill', x: 412, y: 112, w: 38, h: 74, name: 'Windmill', zone: 'Industry', play: 'Powers the grain mill next door: wheat → flour, corn → cornmeal.', stage: 7 });
+  bld('mill', 462, 122, 50, 54, () => HV.mill(462, 122), { name: 'Grain Mill', zone: 'Industry', play: 'Wheat → flour and corn → cornmeal on a timer. Millstones double its speed.', stage: 7 });
   add(178, () => { HV.sack(458, 178); HV.sack(452, 176); });
   bld('silo1', 518, 128, 18, 46, () => HV.silo(518, 128), { name: 'Grain Silo', zone: 'Industry', play: 'Produce storage; capacity upgrades.', stage: 5 });
   bld('silo2', 540, 132, 18, 46, () => HV.silo(540, 132), { name: 'Grain Silo', zone: 'Industry', play: 'Produce storage; capacity upgrades.', stage: 5 });
-  bld('warehouse', 564, 120, 56, 54, () => HV.warehouse(564, 120), { name: 'Produce Warehouse', zone: 'Industry', play: 'Inventory capacity and produce storage for the exchange.', stage: 7 });
-  bld('dairy', 500, 228, 48, 50, () => HV.dairy(500, 228), { name: 'Dairy', zone: 'Industry', play: 'Milk → cheese and butter processing.', stage: 7 });
+  bld('warehouse', 564, 120, 56, 54, () => HV.warehouse(564, 120), { name: 'Produce Warehouse', zone: 'Industry', play: 'Storage capacity and perishables. Cold storage keeps eggs, milk and tomatoes fresh.', stage: 7 });
+  bld('dairy', 500, 228, 48, 50, () => HV.dairy(500, 228), { name: 'Dairy', zone: 'Industry', play: 'Milk → cheese and butter on a timer.', stage: 7 });
   add(282, () => { HV.milkcan(490, 270); HV.milkcan(496, 272); });
-  bld('factory', 558, 232, 52, 52, () => HV.factory(558, 232), { name: 'Food Processing', zone: 'Industry', play: 'Turns cocoa, coffee and tomatoes into higher-value goods.', stage: 7 });
+  bld('factory', 558, 232, 52, 52, () => HV.factory(558, 232), { name: 'Food Processing', zone: 'Industry', play: 'Tomato sauce, soybean oil, roasted coffee and chocolate — worth more than the raw crops.', stage: 7 });
   bld('shed', 494, 300, 60, 44, () => HV.shed(494, 300), { name: 'Equipment Shed', zone: 'Industry', play: 'Machinery storage: planters, tractors, harvesters.', stage: 5 });
   bld('harvester', 558, 318, 42, 26, () => HV.harvester(558, 318), { kind: 'machine', name: 'Combine Harvester', zone: 'Industry', play: 'Machinery: harvests a whole field in one action.', stage: 5 });
 
   // ---- Marketplace
-  bld('exchange', 704, 84, 96, 96, () => HV.exchange(704, 84), { name: 'Commodity Exchange', zone: 'Marketplace', play: 'Trade crops at prices referenced to real markets (always labelled when simulated).', stage: 7 });
+  bld('exchange', 704, 84, 96, 96, () => HV.exchange(704, 84), { name: 'Commodity Exchange', zone: 'Marketplace', play: 'Buy and sell crops at server prices that follow real monthly market references, within bounds.', stage: 7 });
   bld('vault', 814, 108, 60, 68, () => HV.vault(814, 108), { name: 'HRV Game Vault', zone: 'Marketplace', play: 'Deposit and withdraw $HRV, view burns and treasury. Wallet-signed.', stage: 8 });
-  bld('storage', 892, 112, 58, 54, () => HV.warehouse(892, 112, ['#9c6436', '#6e4527', '#c48d52']), { name: 'Market Storage', zone: 'Marketplace', play: 'Escrow storage for marketplace listings.', stage: 7 });
-  bld('board', 962, 146, 24, 22, () => HV.board(962, 146), { name: 'Delivery Contracts', zone: 'Marketplace', play: 'Pick contracts (e.g. 200 wheat by Friday) for XP and eligible rewards.', stage: 7 });
+  bld('storage', 892, 112, 58, 54, () => HV.warehouse(892, 112, ['#9c6436', '#6e4527', '#c48d52']), { name: 'Market Storage', zone: 'Marketplace', play: 'Escrow storage for player marketplace listings.', stage: 8 });
+  bld('board', 962, 146, 24, 22, () => HV.board(962, 146), { name: 'Delivery Contracts', zone: 'Marketplace', play: 'Deliver produce and goods within 2 hours for a fixed coin premium and XP.', stage: 7 });
   const stalls: [number, string, string[]][] = [[706, '#c4553b', ['#e0402f', '#f2c94c', '#8fd45c', '#3f6fa8']], [738, '#3f6fa8', ['#f4efe2', '#f2c94c', '#e9e0c8', '#4f9a3c']], [770, '#e8a33a', ['#c22f2f', '#6b4226', '#d9822b', '#7b5cc4']], [802, '#4e8a3c', ['#f2c94c', '#e0402f', '#c9a6e8', '#c4553b']],
     [874, '#7b5cc4', ['#d9822b', '#6b4226', '#f2c94c', '#2f6f2e']], [906, '#c4553b', ['#8fd45c', '#e0402f', '#f4efe2', '#e8a33a']], [938, '#3f8a8c', ['#e9e0c8', '#f2c94c', '#c22f2f', '#3f6fa8']]];
   stalls.forEach(([sx, c, gds]) => bld('stall' + sx, sx, 232, 26, 24, () => HV.stall(sx, 232, c, gds)));
-  spot({ id: 'market', x: 702, y: 228, w: 130, h: 30, name: 'Produce Market', zone: 'Marketplace', play: 'Player-to-player listings settled in $HRV, with transparent fees.', stage: 7 });
+  spot({ id: 'market', x: 702, y: 228, w: 130, h: 30, name: 'Produce Market', zone: 'Marketplace', play: 'Player-to-player listings settled in $HRV, with transparent fees.', stage: 8 });
   spot({ id: 'trading', x: 870, y: 228, w: 96, h: 30, name: 'Trading Stalls', zone: 'Marketplace', play: 'Buy seeds, feed and tools. Every item ≤ $15 reference price.', stage: 4 });
   for (const lx of [700, 1004]) add(214, () => HV.lamp(lx, 214));
   for (const lx of [700, 868, 1004]) add(272, () => HV.lamp(lx, 272));

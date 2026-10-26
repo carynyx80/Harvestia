@@ -7,7 +7,7 @@
 import { applyAction, type FarmAction } from '../../shared/sim/actions';
 import { tick } from '../../shared/sim/engine';
 import type { FarmState } from '../../shared/sim/state';
-import { ApiError, getFarm, loadSession, openLive, postAction, resetFarm, saveSession, signInGuest } from './api';
+import { ApiError, getFarm, getMarket, loadSession, openLive, postAction, resetFarm, saveSession, signInGuest } from './api';
 import { loadState, saveState } from '@/game/sim/save';
 import { pushEvents, setActionSender, useGame } from '@/store/game';
 
@@ -20,6 +20,11 @@ let retryDelay = 2000;
 let live: { close(): void } | null = null;
 
 const now = () => Date.now() + useGame.getState().serverOffset;
+
+/** Loads the latest published prices; quotes for trades come from here. */
+async function refreshMarket() {
+  try { useGame.setState({ market: await getMarket() }); } catch { /* keep the last prices; trades re-check on the server */ }
+}
 
 /** Confirmed server state with every unconfirmed action re-applied on top. */
 function rebase() {
@@ -45,6 +50,7 @@ async function flush() {
         if (r.lastSeq && r.lastSeq > seq) seq = r.lastSeq;
         // the prediction said yes but the server said no (e.g. timing at a boundary): tell the player
         if (!r.ok && !r.duplicate && r.error) pushEvents([{ kind: 'toast', text: r.error, tone: 'bad' }]);
+        if (!r.ok && item.action.type === 'trade') void refreshMarket();
         rebase();
       } catch (e) {
         if (e instanceof ApiError && e.status === 429) { pushEvents([{ kind: 'toast', text: 'Slow down a little — too many actions at once', tone: 'bad' }]); pending.shift(); rebase(); continue; }
@@ -85,6 +91,7 @@ async function connect(): Promise<boolean> {
       const st = useGame.getState();
       if (m.type === 'hello') useGame.setState({ live: { online: m.online ?? 0, feed: (m.recent ?? []).map(r => ({ text: r.text, at: r.at })) } });
       else if (m.type === 'presence') useGame.setState({ live: { ...st.live, online: m.online ?? 0 } });
+      else if (m.type === 'market') void refreshMarket();
       else if (m.type === 'activity' && m.text) {
         useGame.setState({ live: { ...st.live, feed: [{ text: m.text, at: m.at ?? Date.now() }, ...st.live.feed].slice(0, 12) } });
         if (!m.text.startsWith(st.session?.farmName ?? '\u0000')) pushEvents([{ kind: 'toast', text: m.text, tone: 'info' }]);
@@ -102,6 +109,7 @@ export function startSync() {
   const st = useGame.getState();
   // show something immediately: the cached farm, then the server's copy replaces it
   if (!st.farm) st.setFarm(tick(loadState(Date.now()), Date.now(), st.conditions()));
+  void refreshMarket();
   void connect().then(ok => {
     if (!ok) { useGame.setState({ connection: 'offline' }); pushEvents([{ kind: 'toast', text: "Can't reach the farm server — playing offline; progress here won't be saved to your account", tone: 'bad' }]); }
   });
@@ -123,7 +131,8 @@ export function startSync() {
     } catch { useGame.setState({ connection: 'offline' }); }
   }, 30_000);
   const cacheId = setInterval(() => { const f = useGame.getState().farm; if (f) saveState(f); }, 10_000);
-  return () => { clearInterval(tickId); clearInterval(syncId); clearInterval(cacheId); live?.close(); setActionSender(null); };
+  const marketId = setInterval(() => void refreshMarket(), 60_000);
+  return () => { clearInterval(tickId); clearInterval(syncId); clearInterval(cacheId); clearInterval(marketId); live?.close(); setActionSender(null); };
 }
 
 /** Starts the farm over on the server. */

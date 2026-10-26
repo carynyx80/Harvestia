@@ -2,10 +2,11 @@
 // Commodity exchange, wallet & vault, and the co-op / competition previews.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import HV from '@/game/art/sprites';
-import { COMMODITIES, change, orderBook, recentTrades, series, virtualPrice } from '@/game/data/market';
-import { EXCHANGE_FEE, VAULT_FEES } from '@/game/data/economy';
+import { VAULT_FEES } from '@/game/data/economy';
+import { tradeTotal, type RefInfo } from '../../../shared/market';
+import { tradeUsed } from '@/game/sim/engine';
 import { useGame } from '@/store/game';
-import { getLeaderboard, type LeaderRow } from '@/lib/api';
+import { getLeaderboard, getMarketHistory, type LeaderRow, type MarketHistory } from '@/lib/api';
 import { Card, SimTag, SpriteThumb, StageButton, Window } from '@/components/ui/kit';
 import { Icon } from '@/components/hud/Icon';
 
@@ -17,7 +18,8 @@ function Chart({ data, up }: { data: number[]; up: boolean }) {
     g.clearRect(0, 0, W, H);
     g.fillStyle = '#efdcae'; g.fillRect(0, 0, W, H);
     g.fillStyle = '#e2c98f'; for (let y = 10; y < H; y += 18) g.fillRect(0, y, W, 1); for (let x = 0; x < W; x += 40) g.fillRect(x, 0, 1, H);
-    // one column per pixel, interpolated between daily points, so the line is continuous
+    if (data.length < 2) return;
+    // one column per pixel, interpolated between points, so the line is continuous
     let py: number | null = null;
     for (let x = 0; x < W; x++) {
       const t = x / (W - 1) * (data.length - 1), k = Math.floor(t), f = t - k;
@@ -32,76 +34,137 @@ function Chart({ data, up }: { data: number[]; up: boolean }) {
   return <canvas ref={ref} width={240} height={84} className="pixel h-[168px] w-full border-2 border-wood" />;
 }
 
+const STATUS: Record<RefInfo['status'], [string, string]> = {
+  ok: ['Reference in use', 'bg-leaf text-white'],
+  outage: ['Provider unreachable — using last valid value', 'bg-gold text-ink'],
+  stale: ['Stale — not used until new data arrives', 'bg-down text-white'],
+  none: ['No reference data yet', 'bg-parch-d text-ink'],
+};
+const fmtRef = (r: RefInfo) => r.value === null ? '—' : r.unit === 'US¢/lb' ? `${r.value.toFixed(1)}¢/lb` : `$${r.value.toLocaleString('en-US', { maximumFractionDigits: 2 })}/t`;
+const fmtMonth = (p: string | null) => p ? new Date(`${p}-01T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }) : '—';
+const ago = (t: number) => { const m = Math.round((Date.now() - t) / 60_000); return m < 1 ? 'just now' : m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`; };
+const drawCrop = (key: string) => () => HV.crop(key, 3, 8, 15);
+
 export function ExchangePanel({ tab = 'wheat' }: { tab?: string }) {
-  const close = useGame(s => s.closePanel), open = useGame(s => s.openPanel);
-  const i = Math.max(0, COMMODITIES.findIndex(c => c.key === tab)), c = COMMODITIES[i];
-  const [range, setRange] = useState(30);
-  const [side, setSide] = useState<'buy' | 'sell'>('buy');
+  const close = useGame(s => s.closePanel), open = useGame(s => s.openPanel), market = useGame(s => s.market), farm = useGame(s => s.farm), act = useGame(s => s.act);
+  const c = market?.commodities.find(x => x.key === tab) ?? market?.commodities[0];
+  const [view, setView] = useState<'game' | 'reference'>('game');
+  const [side, setSide] = useState<'buy' | 'sell'>('sell');
   const [qty, setQty] = useState(10);
-  const full = useMemo(() => series(i), [i]);
-  const data = full.slice(-range), ch = change(full, 7), up = ch >= 0;
-  const vp = virtualPrice(i), book = orderBook(vp.price, i), trades = recentTrades(vp.price, i);
-  const draw = useMemo(() => () => HV.crop(c.key, 3, 8, 15), [c.key]);
-  const total = qty * vp.price, fee = total * EXCHANGE_FEE;
+  const [hist, setHist] = useState<MarketHistory | null>(null);
+  const key = c?.key, publishedAt = c?.price?.at, traded = farm?.stats.traded ?? 0;
+  // refetch on new prices and after the player's own trades land
+  useEffect(() => {
+    if (!key) return;
+    let alive = true;
+    getMarketHistory(key, 7).then(h => alive && setHist(h), () => alive && setHist(null));
+    return () => { alive = false; };
+  }, [key, publishedAt, traded]);
+  const draw = useMemo(() => drawCrop(c?.key ?? 'wheat'), [c?.key]);
+
+  if (!market || !c) {
+    return (
+      <Window title="Commodity Exchange" icon="chart" onClose={close} width={560}>
+        <p className="m-0 text-sm">{useGame.getState().connection === 'offline' ? 'The exchange can’t be reached right now. Prices and trading come back as soon as the farm server does.' : 'Loading market prices…'}</p>
+      </Window>
+    );
+  }
+
+  const price = c.price, ref = c.ref;
+  const unitPrice = price ? (side === 'buy' ? price.ask : price.bid) : 0;
+  const t = tradeTotal(side, qty, unitPrice);
+  const have = farm?.inventory[c.item] ?? 0;
+  const used = farm ? tradeUsed(farm, c.item, side, Date.now()) : 0;
+  const left = market.rules.perDay - used;
+  const block = !price ? 'No price published yet' : qty > market.rules.perOrder ? `Max ${market.rules.perOrder} per order` : qty > left ? `Only ${left} left today` : side === 'sell' && qty > have ? `You have ${have}` : side === 'buy' && (farm?.coins ?? 0) < t.total ? 'Not enough coins' : '';
+  const series = view === 'game' ? (hist?.prices.map(p => p.mid) ?? []) : (hist?.reference.map(r => r.value) ?? []);
+  const up = series.length > 1 ? series[series.length - 1] >= series[0] : true;
 
   return (
-    <Window title="Commodity Exchange" icon="chart" onClose={close} width={980}
-      footer={<>All figures are <b>simulated</b>. In Stage 7, reference prices come from licensed data providers with source and timestamp, stale or outlier prices are rejected, and in-game prices move within bounded limits. Virtual crops are not claims on physical commodities.</>}>
-      <div className="grid gap-3 lg:grid-cols-[190px_1fr_250px]">
+    <Window title="Commodity Exchange" icon="chart" onClose={close} width={1000}
+      footer={<>In-game prices are set by the server every {market.rules.publishEveryMs / 60_000} minutes from a bounded formula: each update moves at most ±{market.rules.step * 100}% and stays within ±{market.rules.dayBand * 100}% of the price a day earlier. Real-market references are monthly averages and can move a game price only {Math.round((1 - market.rules.refBounds[0]) * 100)}% down or {Math.round((market.rules.refBounds[1] - 1) * 100)}% up. Virtual crops are not claims on physical commodities.</>}>
+      <div className="grid gap-3 lg:grid-cols-[200px_1fr_260px]">
         <div className="flex flex-col gap-1">
-          {COMMODITIES.map((x, k) => {
-            const s = series(k), d = change(s, 7);
-            return (
-              <button key={x.key} onClick={() => open('exchange', x.key)} className={`flex items-center gap-2 border-2 px-2 py-1 text-left text-sm ${k === i ? 'border-gold bg-[#fff0b8]' : 'border-wood bg-[#e9d29c] hover:bg-parch-l'}`}>
-                <SpriteThumb draw={() => HV.crop(x.key, 3, 8, 15)} box={20} maxScale={2} />
-                <span className="flex-1 leading-tight"><b>{x.name}</b><small className="block text-[10px] text-muted">{x.referenced ? 'Real-market referenced' : 'In-game only'}</small></span>
-                <b className={d >= 0 ? 'text-up' : 'text-down'}>{d >= 0 ? '▲' : '▼'}{Math.abs(d).toFixed(1)}%</b>
-              </button>
-            );
-          })}
+          {market.commodities.map(x => (
+            <button key={x.key} onClick={() => open('exchange', x.key)} className={`flex items-center gap-2 border-2 px-2 py-1 text-left text-sm ${x.key === c.key ? 'border-gold bg-[#fff0b8]' : 'border-wood bg-[#e9d29c] hover:bg-parch-l'}`}>
+              <SpriteThumb draw={drawCrop(x.key)} box={20} maxScale={2} />
+              <span className="flex-1 leading-tight"><b>{x.name}</b><small className="block text-[10px] text-muted">{x.ref ? (x.ref.status === 'ok' ? 'Real-market referenced' : `Reference ${x.ref.status}`) : 'In-game only'}</small></span>
+              <span className="text-right leading-tight"><b className="block">{x.price?.mid.toFixed(2) ?? '—'}</b>
+                {x.change24h !== null && <small className={`block text-[11px] font-bold ${x.change24h >= 0 ? 'text-up' : 'text-down'}`}>{x.change24h >= 0 ? '▲' : '▼'}{Math.abs(x.change24h).toFixed(1)}%</small>}</span>
+            </button>
+          ))}
         </div>
 
         <div className="flex min-w-0 flex-col gap-2">
           <div className="flex flex-wrap items-end gap-3">
             <SpriteThumb draw={draw} box={40} />
-            <div><b className="text-2xl">{c.name}</b><div className="text-sm text-muted">{c.referenced ? `Reference (sim): ${c.ref >= 1000 ? c.ref.toLocaleString('en-US') : `$${c.ref.toFixed(2)}`}/${c.unit}` : 'Priced by in-game supply and demand'}</div></div>
-            <div className="ml-auto text-right"><b className="text-2xl">{vp.price.toFixed(2)}</b> <span className="text-sm">coins / unit</span><div className={`text-sm font-bold ${up ? 'text-up' : 'text-down'}`}>{up ? '▲' : '▼'} {Math.abs(ch).toFixed(1)}% · 7d</div></div>
+            <div><b className="text-2xl">{c.name}</b><div className="text-sm text-muted">{price ? `Published ${ago(price.at)} · ${c.volume24h.toLocaleString('en-US')} units traded in 24h` : 'Waiting for the first published price'}</div></div>
+            {price && <div className="ml-auto text-right"><b className="text-2xl">{price.mid.toFixed(2)}</b> <span className="text-sm">coins / unit</span>
+              <div className="text-sm">Exchange buys at <b className="text-up">{price.bid.toFixed(2)}</b> · sells at <b className="text-down">{price.ask.toFixed(2)}</b></div></div>}
           </div>
+
+          {ref ? (
+            <Card className="text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <b>Real-market reference</b>
+                <span className={`border-2 border-wood-d px-1.5 text-[11px] font-bold ${STATUS[ref.status][1]}`}>{STATUS[ref.status][0]}</span>
+              </div>
+              <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 sm:grid-cols-4">
+                <span className="text-muted">{ref.label}</span><b>{fmtRef(ref)}</b>
+                <span className="text-muted">Month</span><b>{fmtMonth(ref.period)} average</b>
+                <span className="text-muted">24-month average</span><b>{ref.average !== null && ref.usdPerTonne !== null && ref.value !== null ? fmtRef({ ...ref, value: ref.average * ref.value / ref.usdPerTonne }) : '—'}</b>
+                <span className="text-muted">vs average</span><b className={(ref.ratio ?? 1) >= 1 ? 'text-up' : 'text-down'}>{ref.ratio !== null ? `${ref.ratio >= 1 ? '+' : ''}${((ref.ratio - 1) * 100).toFixed(1)}%` : '—'}</b>
+              </div>
+              <p className="m-0 mt-1 text-[11px] leading-snug text-muted">
+                Source: {ref.attribution || ref.source}{ref.url && <> · <a className="underline" href={ref.url} target="_blank" rel="noreferrer">series</a></>}.
+                {ref.fetchedAt && <> Checked {ago(ref.lastOkAt ?? ref.fetchedAt)}.</>}{ref.rejected > 0 && <> {ref.rejected} implausible value{ref.rejected > 1 ? 's' : ''} rejected.</>}{ref.lastError && <> Last error: {ref.lastError}.</>}
+              </p>
+            </Card>
+          ) : <Card className="text-sm"><b>No real-world reference.</b> {c.name} is priced only by in-game supply and demand, season and balancing.</Card>}
+
           <div className="flex items-center gap-1 text-xs">
-            {[7, 30, 60].map(r => <button key={r} onClick={() => setRange(r)} className={`${range === r ? 'btn-gold' : 'btn-wood'} !px-2 !py-0`}>{r}D</button>)}
-            <span className="ml-auto"><SimTag /></span>
+            <button onClick={() => setView('game')} className={`${view === 'game' ? 'btn-gold' : 'btn-wood'} !px-2 !py-0`}>Game price · 7D</button>
+            {ref && <button onClick={() => setView('reference')} className={`${view === 'reference' ? 'btn-gold' : 'btn-wood'} !px-2 !py-0`}>Reference · 24M</button>}
+            <span className="ml-auto text-muted">{series.length ? `${series.length} points` : 'No history yet'}</span>
           </div>
-          <Chart data={data} up={up} />
-          <Card>
-            <b className="mb-1 block text-sm">How the in-game price is set</b>
-            <table className="w-full text-xs"><tbody>
-              <tr><td className="text-muted">Base value</td><td className="text-right">{vp.base.toFixed(2)}</td></tr>
-              {vp.parts.map(p => <tr key={p.label}><td className="text-muted">× {p.label}</td><td className="text-right">{p.value.toFixed(3)}</td></tr>)}
-              <tr className="border-t border-parch-d font-bold"><td>Price (daily move capped ±{vp.bound * 100}%)</td><td className="text-right">{vp.price.toFixed(2)}</td></tr>
-            </tbody></table>
-          </Card>
+          <Chart data={series} up={up} />
+
+          {price && (
+            <Card>
+              <b className="mb-1 block text-sm">How the in-game price is set</b>
+              <table className="w-full text-xs"><tbody>
+                <tr><td className="text-muted">Base value</td><td className="text-right">{price.base.toFixed(2)}</td></tr>
+                {price.parts.map(p => <tr key={p.key}><td className="text-muted">× {p.label}</td><td className="text-right">{p.value.toFixed(3)}</td></tr>)}
+                <tr className="border-t border-parch-d"><td>Target</td><td className="text-right">{price.target.toFixed(2)}</td></tr>
+                <tr className="font-bold"><td>Published price (moves toward the target in bounded steps)</td><td className="text-right">{price.mid.toFixed(2)}</td></tr>
+              </tbody></table>
+            </Card>
+          )}
         </div>
 
         <div className="flex flex-col gap-2">
           <Card className="flex flex-col gap-1.5">
             <div className="grid grid-cols-2 gap-1">{(['buy', 'sell'] as const).map(s => <button key={s} onClick={() => setSide(s)} className={`${side === s ? (s === 'buy' ? 'bg-leaf text-white' : 'bg-down text-white') : 'bg-parch'} border-2 border-wood-d py-1 text-sm font-bold capitalize`}>{s}</button>)}</div>
             <label className="flex items-center justify-between text-sm">Quantity
-              <span className="flex items-center gap-1"><button className="btn-wood !px-2 !py-0" onClick={() => setQty(q => Math.max(1, q - 5))}>−</button><input value={qty} onChange={e => setQty(Math.max(1, Math.min(9999, Number(e.target.value.replace(/\D/g, '')) || 1)))} className="w-14 border-2 border-wood bg-parch-l px-1 text-center" inputMode="numeric" aria-label="Quantity" /><button className="btn-wood !px-2 !py-0" onClick={() => setQty(q => q + 5)}>+</button></span>
+              <span className="flex items-center gap-1"><button className="btn-wood !px-2 !py-0" onClick={() => setQty(q => Math.max(1, q - 5))}>−</button><input value={qty} onChange={e => setQty(Math.max(1, Math.min(market.rules.perOrder, Number(e.target.value.replace(/\D/g, '')) || 1)))} className="w-14 border-2 border-wood bg-parch-l px-1 text-center" inputMode="numeric" aria-label="Quantity" /><button className="btn-wood !px-2 !py-0" onClick={() => setQty(q => Math.min(market.rules.perOrder, q + 5))}>+</button></span>
             </label>
-            <div className="flex justify-between text-sm"><span className="text-muted">Price</span><b>{vp.price.toFixed(2)}</b></div>
-            <div className="flex justify-between text-sm"><span className="text-muted">Fee ({EXCHANGE_FEE * 100}%)</span><b>{fee.toFixed(2)}</b></div>
-            <div className="flex justify-between border-t border-parch-d pt-1 text-sm"><span>{side === 'buy' ? 'You pay' : 'You receive'}</span><b>{(side === 'buy' ? total + fee : total - fee).toFixed(2)} coins</b></div>
-            <StageButton stage={7} gold>Place {side} order</StageButton>
+            {side === 'sell' && have > 0 && <button className="self-end text-xs underline" onClick={() => setQty(Math.min(have, market.rules.perOrder, left))}>Sell max ({Math.min(have, market.rules.perOrder, left)})</button>}
+            <div className="flex justify-between text-sm"><span className="text-muted">{side === 'buy' ? 'Ask' : 'Bid'} per unit</span><b>{unitPrice.toFixed(2)}</b></div>
+            <div className="flex justify-between text-sm"><span className="text-muted">Fee ({market.rules.fee * 100}%)</span><b>{t.fee}</b></div>
+            <div className="flex justify-between border-t border-parch-d pt-1 text-sm"><span>{side === 'buy' ? 'You pay' : 'You receive'}</span><b>{t.total.toLocaleString('en-US')} coins</b></div>
+            <div className="text-xs text-muted">In storage: {have} · today {used}/{market.rules.perDay} {side === 'buy' ? 'bought' : 'sold'}</div>
+            <button className="btn-gold" disabled={!!block} onClick={() => act({ type: 'trade', item: c.item, side, qty, limit: unitPrice })}>{block || `${side === 'buy' ? 'Buy' : 'Sell'} ${qty} at ${unitPrice.toFixed(2)}`}</button>
+            <p className="m-0 text-[11px] leading-snug text-muted">Your order fills at this price or better. If the price moves against you first, the server refuses it and you can review the new price.</p>
           </Card>
           <Card className="text-xs">
-            <b className="mb-1 block text-sm">Order book</b>
-            {book.asks.map(r => <div key={`a${r.price}`} className="flex justify-between text-down"><span>{r.price.toFixed(2)}</span><span>{r.qty}</span></div>)}
-            <div className="my-0.5 border-y border-parch-d text-center font-bold">{vp.price.toFixed(2)}</div>
-            {book.bids.map(r => <div key={`b${r.price}`} className="flex justify-between text-up"><span>{r.price.toFixed(2)}</span><span>{r.qty}</span></div>)}
+            <b className="mb-1 block text-sm">Supply &amp; demand</b>
+            <div className="flex justify-between"><span className="text-muted">Net sold to the exchange</span><b>{c.pressure.toLocaleString('en-US')} units</b></div>
+            <div className="text-muted">Player selling pushes prices down, buying pushes them up. The effect fades by half every 6 hours.</div>
           </Card>
           <Card className="text-xs">
             <b className="mb-1 block text-sm">Recent trades</b>
-            {trades.map((t, k) => <div key={k} className="flex justify-between"><span className={t.side === 'buy' ? 'text-up' : 'text-down'}>{t.price.toFixed(2)}</span><span>{t.qty}</span><span className="text-muted">{t.ago}</span></div>)}
+            {hist?.trades.length ? hist.trades.slice(0, 8).map((x, k) => <div key={k} className="flex justify-between"><span className={x.side === 'sell' ? 'text-down' : 'text-up'}>{x.side === 'sell' ? 'Sold' : 'Bought'} {x.qty}</span><span>{x.price.toFixed(2)}</span><span className="text-muted">{ago(x.at)}</span></div>)
+              : <span className="text-muted">No trades yet — be the first.</span>}
           </Card>
         </div>
       </div>
