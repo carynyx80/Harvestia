@@ -63,7 +63,7 @@ function Confirm({ item, qty, onBack }: { item: Item; qty: number; onBack: () =>
         <button className="text-xs underline" onClick={() => setN(x => x + 1)}>Refresh quote</button>
       </div>
       <p className="m-0 text-xs leading-snug text-muted">Prices are quoted by the server from verified $HRV pricing with liquidity checks; the price shown here is a demo rate. Burns only count once the transaction is confirmed on-chain.</p>
-      <div className="flex gap-1.5"><button className="btn-wood" onClick={onBack}>Back</button><button className="btn-gold" disabled={(farm?.coins ?? 0) < coins} onClick={() => { if (act((f, now) => buy(f, item.id, qty, now))) onBack(); }}>Buy for {coins.toLocaleString('en-US')} coins</button></div>
+      <div className="flex gap-1.5"><button className="btn-wood" onClick={onBack}>Back</button><button className="btn-gold" disabled={(farm?.coins ?? 0) < coins} onClick={() => { if (act({ type: 'buy', item: item.id, qty: qty })) onBack(); }}>Buy for {coins.toLocaleString('en-US')} coins</button></div>
     </Card>
   );
 }

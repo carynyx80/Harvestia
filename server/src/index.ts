@@ -1,5 +1,5 @@
-import { buildApp } from './app.js';
-import { config } from './config.js';
+import { buildApp } from './app';
+import { config } from './config';
 
 const app = await buildApp();
 try {

@@ -33,7 +33,7 @@ export function InventoryPanel({ tab = 'all' }: { tab?: string }) {
 
   return (
     <Window title="Inventory" icon="bag" tabs={TABS} tab={tab} onTab={k => { setPick(null); open('inventory', k); }} onClose={close}
-      footer={<>Your farm is saved in this browser until accounts arrive (Stage 6). Selling here uses the general store&apos;s fixed price; the commodity exchange opens in Stage 7.</>}>
+      footer={<>Your farm is saved on the Harvestia server. Selling here uses the general store&apos;s fixed price; the commodity exchange opens in Stage 7.</>}>
       <div className="grid gap-3 md:grid-cols-[1fr_260px]">
         <div>
           <div className="mb-2 flex items-center gap-2 text-sm">
@@ -65,13 +65,13 @@ export function InventoryPanel({ tab = 'all' }: { tab?: string }) {
               <dt className="text-muted">Reference</dt><dd className="m-0">≈ {fmtHrv(toHrv(item.usd))}</dd>
             </dl>
             <div className="mt-auto flex flex-wrap gap-1.5">
-              {sellable && [1, 10].filter(n => n < qty).map(n => <button key={n} className="btn-wood !px-2 !py-0.5 text-sm" onClick={() => act(f => sell(f, selId, n))}>Sell {n}</button>)}
-              {sellable && <button className="btn-gold !px-2 !py-0.5 text-sm" onClick={() => act(f => sell(f, selId, qty))}>Sell all · {(coinPrice(selId) * qty).toLocaleString('en-US')}</button>}
+              {sellable && [1, 10].filter(n => n < qty).map(n => <button key={n} className="btn-wood !px-2 !py-0.5 text-sm" onClick={() => act({ type: 'sell', item: selId, qty: n })}>Sell {n}</button>)}
+              {sellable && <button className="btn-gold !px-2 !py-0.5 text-sm" onClick={() => act({ type: 'sell', item: selId, qty: qty })}>Sell all · {(coinPrice(selId) * qty).toLocaleString('en-US')}</button>}
               {item.category === 'seeds' && (() => {
                 const crop = selId.slice(5) as CropType, locked = CROP_RULES[crop].level > farm.level;
                 return <button className="btn-gold !px-2 !py-0.5 text-sm" disabled={locked} onClick={() => { setSeed(selId); setTool('plant'); close(); }}>{locked ? `Unlocks at level ${CROP_RULES[crop].level}` : 'Plant these'}</button>;
               })()}
-              {item.category === 'feed' && <button className="btn-gold !px-2 !py-0.5 text-sm" onClick={() => act((f, now) => feedAll(f, now))}>Feed hungry animals</button>}
+              {item.category === 'feed' && <button className="btn-gold !px-2 !py-0.5 text-sm" onClick={() => act({ type: 'feedAll' })}>Feed hungry animals</button>}
               {item.category === 'land' && <span className="text-xs text-muted">Select a field in the world and use it from the inspector.</span>}
             </div>
           </Card>

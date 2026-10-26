@@ -98,11 +98,16 @@ export class WorldScene extends Phaser.Scene {
       if (s.grid !== p.grid) this.gridG.setVisible(s.grid);
       if (s.selected !== p.selected && !s.selected) this.drawOverlay(0);
       if (s.envCommand && s.envCommand !== p.envCommand) {
+        // any manual change switches to a visual-only preview; `live` returns to the world clock
         const c = s.envCommand, e = this.env;
-        if (c.hour !== undefined) e.hour = c.hour;
-        if (c.speed !== undefined) e.speed = c.speed;
-        if (c.weather) e.weather = c.weather;
-        if (c.season && c.season !== this.season) this.applySeason(c.season);
+        if (c.live) e.live = true;
+        else {
+          e.live = false;
+          if (c.hour !== undefined) e.hour = c.hour;
+          if (c.speed !== undefined) e.speed = c.speed;
+          if (c.weather) e.weather = c.weather;
+          if (c.season) e.season = c.season;
+        }
         this.envSync = 0;
       }
     });
@@ -508,13 +513,13 @@ export class WorldScene extends Phaser.Scene {
     if (!sel || !farm) return;
     if (sel.type === 'cell') {
       const ce = farm.plots[sel.plot].cells[sel.cell];
-      if (st.tool === 'plant' && !ce.crop) st.act((f, now) => plant(f, sel.plot, sel.cell, st.seed, now));
-      else if (st.tool === 'water') st.act((f, now) => water(f, sel.plot, sel.cell, now));
-      else if (st.tool === 'harvest' || (ce.crop && ce.growth >= 1)) st.act((f, now) => harvest(f, sel.plot, sel.cell, now));
-    } else if (sel.type === 'hotspot' && st.tool === 'water' && (sel.hot.id === 'well' || sel.hot.id === 'pond')) st.act(f => refill(f));
+      if (st.tool === 'plant' && !ce.crop) st.act({ type: 'plant', plot: sel.plot, cell: sel.cell, seed: st.seed });
+      else if (st.tool === 'water') st.act({ type: 'water', plot: sel.plot, cell: sel.cell });
+      else if (st.tool === 'harvest' || (ce.crop && ce.growth >= 1)) st.act({ type: 'harvest', plot: sel.plot, cell: sel.cell });
+    } else if (sel.type === 'hotspot' && st.tool === 'water' && (sel.hot.id === 'well' || sel.hot.id === 'pond')) st.act({ type: 'refill' });
     else if (sel.type === 'animal' && sel.kind !== 'duck') {
       const a = farm.animals.find(x => x.id === sel.id);
-      if (a?.ready) st.act(f => collect(f, sel.id));
+      if (a?.ready) st.act({ type: 'collect', animal: sel.id });
     }
   }
 
@@ -616,8 +621,9 @@ export class WorldScene extends Phaser.Scene {
     if (k.S.isDown || k.DOWN.isDown) cam.scrollY += pan;
 
     const env = this.env;
+    env.offset = useGame.getState().serverOffset;
     env.update(dt);
-    if ((env.weather === 'drought') !== this.dry && !cam.fadeEffect.isRunning) this.applySeason(this.season, env.weather === 'drought');
+    if (!cam.fadeEffect.isRunning && (env.season !== this.season || (env.weather === 'drought') !== this.dry)) this.applySeason(env.season, env.weather === 'drought');
     this.updateActors(dt, t);
     for (const f of this.fx) { f.g.clear(); HV.use(f.ctx); f.draw(t); }
     // tree canopies sway: gentle in fair weather, hard in storms

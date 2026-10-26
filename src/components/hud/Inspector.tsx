@@ -37,7 +37,7 @@ function FieldImprovements({ farm, plot }: { farm: FarmState; plot: number }) {
   const p = farm.plots[plot];
   const items = (['land-fertile', 'land-irrigation'] as const).filter(id => (farm.inventory[id] ?? 0) > 0 && !(id === 'land-fertile' ? p.fertile : p.irrigated));
   if (!items.length) return null;
-  return <>{items.map(id => <button key={id} className="btn-wood !px-2 !py-0.5 text-xs" onClick={() => act(f => improveField(f, id, plot))}>Use {ITEM[id].name.toLowerCase()}</button>)}</>;
+  return <>{items.map(id => <button key={id} className="btn-wood !px-2 !py-0.5 text-xs" onClick={() => act({ type: 'improve', item: id, plot: plot })}>Use {ITEM[id].name.toLowerCase()}</button>)}</>;
 }
 
 export function Inspector() {
@@ -64,9 +64,9 @@ export function Inspector() {
     if (ce.crop) bar = <Bar value={ce.growth} className="mb-2" color={ce.growth >= 1 ? '#e8b93c' : '#7cc24c'} />;
     text = ce.crop ? (ce.growth >= 1 ? 'Ripe! Harvest it with the harvest tool or the button below.' : 'Growing. Keep the soil wet so it keeps growing.') : 'Ready for planting. Pick a seed with the Plant tool.';
     actions = <>
-      {!ce.crop && <button className="btn-gold !px-2 !py-0.5 text-sm" onClick={() => act((f, n) => plant(f, sel.plot, sel.cell, seed, n))}>Plant {ITEM[seed]?.name.replace(' seeds', '').toLowerCase()}</button>}
-      {ce.crop && ce.growth >= 1 && <button className="btn-gold !px-2 !py-0.5 text-sm" onClick={() => act((f, n) => harvest(f, sel.plot, sel.cell, n))}>Harvest</button>}
-      {(!ce.crop || ce.growth < 1) && <button className="btn-wood !px-2 !py-0.5 text-sm" onClick={() => act((f, n) => water(f, sel.plot, sel.cell, n))}>Water row ({farm.can})</button>}
+      {!ce.crop && <button className="btn-gold !px-2 !py-0.5 text-sm" onClick={() => act({ type: 'plant', plot: sel.plot, cell: sel.cell, seed: seed })}>Plant {ITEM[seed]?.name.replace(' seeds', '').toLowerCase()}</button>}
+      {ce.crop && ce.growth >= 1 && <button className="btn-gold !px-2 !py-0.5 text-sm" onClick={() => act({ type: 'harvest', plot: sel.plot, cell: sel.cell })}>Harvest</button>}
+      {(!ce.crop || ce.growth < 1) && <button className="btn-wood !px-2 !py-0.5 text-sm" onClick={() => act({ type: 'water', plot: sel.plot, cell: sel.cell })}>Water row ({farm.can})</button>}
       <FieldImprovements farm={farm} plot={sel.plot} />
     </>;
   } else if (sel.type === 'hotspot' && sel.hot.kind === 'plot' && farm && sel.hot.plot !== undefined) {
@@ -90,14 +90,14 @@ export function Inspector() {
       bar = <Bar value={a.progress / rule.cycle} className="mb-2" color="#e8b93c" />;
       text = fed ? 'Producing while fed.' : `Feed it ${ITEM[rule.feed].name.toLowerCase()} to restart production (you have ${farm.inventory[rule.feed] ?? 0}).`;
       actions = <>
-        {a.ready && <button className="btn-gold !px-2 !py-0.5 text-sm" onClick={() => act(f => collect(f, a.id))}>Collect {PRODUCT_NAME[a.kind].toLowerCase()}</button>}
-        <button className="btn-wood !px-2 !py-0.5 text-sm" onClick={() => act((f, n) => feed(f, a.id, n))}>Feed</button>
+        {a.ready && <button className="btn-gold !px-2 !py-0.5 text-sm" onClick={() => act({ type: 'collect', animal: a.id })}>Collect {PRODUCT_NAME[a.kind].toLowerCase()}</button>}
+        <button className="btn-wood !px-2 !py-0.5 text-sm" onClick={() => act({ type: 'feed', animal: a.id })}>Feed</button>
         <button className="btn-wood !px-2 !py-0.5 text-sm" onClick={() => open('livestock', a.kind)}>Herd</button>
       </>;
     }
   } else if (sel.type === 'hotspot') {
     zone = sel.hot.zone; title = sel.hot.name; text = sel.hot.play; stage = sel.hot.stage;
-    if ((sel.hot.id === 'well' || sel.hot.id === 'pond') && farm) actions = <button className="btn-gold !px-2 !py-0.5 text-sm" onClick={() => act(f => refill(f))}>Refill watering can ({farm.can})</button>;
+    if ((sel.hot.id === 'well' || sel.hot.id === 'pond') && farm) actions = <button className="btn-gold !px-2 !py-0.5 text-sm" onClick={() => act({ type: 'refill' })}>Refill watering can ({farm.can})</button>;
     const link = LINKS[sel.hot.id];
     if (link) actions = <>{actions}<button className="btn-gold !px-2 !py-0.5 text-sm" onClick={() => open(link[1], link[2])}>{link[0]}</button></>;
   } else if (sel.type === 'animal') {

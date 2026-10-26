@@ -1,0 +1,97 @@
+// Harvestia database. The farm's full state is stored as JSON (the shared
+// engine's FarmState); inventory and headline numbers are mirrored into columns
+// and tables so they can be queried, ranked and later traded.
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Player {
+  id         String    @id @default(cuid())
+  name       String
+  /** linked in Stage 8 by signing a one-time message */
+  wallet     String?   @unique
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  sessions   Session[]
+  farm       Farm?
+  flags      Flag[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  playerId  String
+  player    Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  /** SHA-256 of the bearer token; the token itself is never stored */
+  tokenHash String   @unique
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  userAgent String?
+
+  @@index([playerId])
+  @@index([expiresAt])
+}
+
+model Farm {
+  id        String          @id @default(cuid())
+  playerId  String          @unique
+  player    Player          @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  name      String
+  state     Json
+  /** highest action sequence number applied; replays and duplicates are rejected */
+  lastSeq   Int             @default(0)
+  version   Int             @default(0)
+  level     Int             @default(1)
+  xp        Int             @default(0)
+  coins     Int             @default(0)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  inventory InventoryItem[]
+  actions   ActionLog[]
+
+  @@index([level, coins])
+}
+
+model InventoryItem {
+  farmId String
+  farm   Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  itemId String
+  qty    Int
+
+  @@id([farmId, itemId])
+  @@index([itemId])
+}
+
+/** Audit trail of every action a client sent, accepted or not. */
+model ActionLog {
+  id        BigInt   @id @default(autoincrement())
+  farmId    String
+  farm      Farm     @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  seq       Int
+  type      String
+  payload   Json
+  ok        Boolean
+  error     String?
+  createdAt DateTime @default(now())
+
+  @@index([farmId, createdAt])
+  @@index([createdAt])
+}
+
+/** Suspicious activity for review (anti-cheat). */
+model Flag {
+  id        String   @id @default(cuid())
+  playerId  String
+  player    Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  reason    String
+  detail    Json
+  createdAt DateTime @default(now())
+
+  @@index([playerId])
+}

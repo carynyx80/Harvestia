@@ -9,6 +9,7 @@ import { WEATHER_LABEL, formatHour } from '@/game/env/environment';
 import { ANIMAL_RULES, MACHINE_RULES, xpForLevel, type AnimalType } from '@/game/sim/rules';
 import { animalCapacity, claimTask, collect, collectAll, feed, feedAll, growthRate, stageOf, taskProgress, upgradeMachine } from '@/game/sim/engine';
 import { clearSave, initialState } from '@/game/sim/state';
+import { resetOnlineFarm } from '@/lib/sync';
 import { useGame } from '@/store/game';
 import { Bar, Card, ItemIcon, SpriteThumb, Window } from '@/components/ui/kit';
 import { Icon } from '@/components/hud/Icon';
@@ -20,22 +21,23 @@ const STAT_LABEL: [string, string][] = [['planted', 'Crops planted'], ['harveste
 
 export function ProfilePanel() {
   const close = useGame(s => s.closePanel), open = useGame(s => s.openPanel), farm = useGame(s => s.farm), setFarm = useGame(s => s.setFarm), toast = useGame(s => s.toast);
+  const session = useGame(s => s.session), connection = useGame(s => s.connection);
   const [confirmReset, setConfirmReset] = useState(false);
   if (!farm) return null;
   // early achievements follow live stats; the rest unlock in later stages
   const got = (name: string) => name === 'First Harvest' ? (farm.stats.harvested ?? 0) > 0 : name === 'Mechanised' ? !!farm.machines['mach-tractor'] : name === 'Rancher' ? (['chicken', 'sheep', 'pig', 'cow'] as AnimalType[]).every(k => farm.animals.some(a => a.kind === k)) : name === 'Green Thumb' ? (farm.stats.planted ?? 0) >= 50 : false;
   return (
-    <Window title="Farmer profile" icon="home" onClose={close} width={760} footer="Saved in this browser until accounts arrive in Stage 6. Wallet ownership will be proven by signing a one-time message — never by a seed phrase or private key.">
+    <Window title="Farmer profile" icon="home" onClose={close} width={760} footer="Your farm is saved on the Harvestia server under a guest account kept in this browser. Wallet sign-in arrives in Stage 8 and will prove ownership by signing a one-time message — never by a seed phrase or private key.">
       <div className="grid gap-3 md:grid-cols-[220px_1fr]">
         <Card className="flex flex-col items-center gap-2 text-center">
           <div className="grid h-28 w-full place-items-center border-2 border-wood bg-[#9fd3e6] shadow-[inset_0_-24px_0_#5fb44b]"><SpriteThumb draw={drawAvatar} box={96} maxScale={6} /></div>
-          <b className="text-xl">Sunny Acres</b>
-          <span className="text-sm text-muted">Guest farmer</span>
+          <b className="text-xl">{session?.farmName ?? 'Sunny Acres'}</b>
+          <span className="text-sm text-muted">{session ? `Guest farmer · ${session.playerName}` : connection === 'offline' ? 'Offline — local farm' : 'Connecting…'}</span>
           <div className="w-full text-left text-sm"><div className="flex justify-between"><b>Level {farm.level}</b><span className="text-muted">{farm.xp} / {xpForLevel(farm.level)} XP</span></div><Bar value={farm.xp / xpForLevel(farm.level)} /></div>
           <div className="w-full text-left text-sm"><b>{farm.coins.toLocaleString('en-US')}</b> Farm Coins</div>
           <button className="btn-gold w-full" onClick={() => open('wallet')}>Wallet & Game Vault</button>
           {confirmReset
-            ? <div className="flex w-full gap-1"><button className="btn-wood flex-1 !px-1 text-xs" onClick={() => setConfirmReset(false)}>Keep farm</button><button className="btn-wood flex-1 !bg-down !px-1 text-xs" onClick={() => { clearSave(); setFarm(initialState(Date.now())); setConfirmReset(false); toast('Farm reset to the starter farm', 'info'); }}>Reset</button></div>
+            ? <div className="flex w-full gap-1"><button className="btn-wood flex-1 !px-1 text-xs" onClick={() => setConfirmReset(false)}>Keep farm</button><button className="btn-wood flex-1 !bg-down !px-1 text-xs" onClick={async () => { setConfirmReset(false); clearSave(); const online = await resetOnlineFarm().catch(() => false); if (!online) setFarm(initialState(Date.now())); toast(online ? 'Farm reset to the starter farm on the server' : 'Farm reset to the starter farm', 'info'); }}>Reset</button></div>
             : <button className="text-xs text-muted underline" onClick={() => setConfirmReset(true)}>Start over (reset farm)</button>}
         </Card>
         <div className="flex flex-col gap-3">
@@ -61,11 +63,12 @@ export function ProfilePanel() {
 
 export function FarmPanel() {
   const close = useGame(s => s.closePanel), open = useGame(s => s.openPanel), env = useGame(s => s.env), farm = useGame(s => s.farm), act = useGame(s => s.act);
+  const conditions = useGame(s => s.conditions), activity = useGame(s => s.live.feed);
   if (!farm) return null;
   const fields = farm.plots.filter(p => p.unlocked);
   const byStage = [0, 1, 2, 3].map(st => fields.reduce((n, p) => n + p.cells.filter(c => c.crop && stageOf(c.growth) === st).length, 0));
   const empty = fields.reduce((n, p) => n + p.cells.filter(c => !c.crop).length, 0);
-  const rate = growthRate(farm, { weather: env.weather, season: env.season });
+  const c = conditions(), rate = growthRate(farm, c);
   return (
     <Window title="My farm" icon="home" onClose={close} width={760} footer="Crops only grow while their soil is wet. Rain waters every field; the irrigation pump and irrigation channels keep their fields wet.">
       <div className="grid gap-3 md:grid-cols-2">
@@ -79,7 +82,7 @@ export function FarmPanel() {
         </Card>
         <Card>
           <b className="mb-1 block">Today</b>
-          <div className="flex items-center gap-2 text-sm"><Icon name={env.night > .5 ? 'moon' : 'sun'} size={22} />{env.season[0].toUpperCase() + env.season.slice(1)}, day {env.day} · {WEATHER_LABEL[env.weather]} {env.temp}° · {formatHour(env.hour)}</div>
+          <div className="flex items-center gap-2 text-sm"><Icon name={env.night > .5 ? 'moon' : 'sun'} size={22} />{c.season[0].toUpperCase() + c.season.slice(1)}, day {env.seasonDay} · {WEATHER_LABEL[c.weather]} · {formatHour(env.hour)}</div>
           <div className="mt-1 text-sm">Growth speed right now: <b className={rate >= 1 ? 'text-up' : 'text-down'}>{Math.round(rate * 100)}%</b></div>
           <div className="mt-1 text-xs text-muted">Weather, season and your tractor all change how fast crops grow.</div>
         </Card>
@@ -93,11 +96,17 @@ export function FarmPanel() {
                   <b className="block text-sm">{rule.text}</b>
                   <Bar value={value / rule.target} className="my-1" />
                   <div className="flex items-center justify-between text-xs"><span>{value} / {rule.target}</span><span className="text-muted">+{rule.coins} coins · +{rule.xp} XP</span></div>
-                  {done && <button className="btn-gold mt-1 w-full !py-0.5 text-sm" onClick={() => act(f => claimTask(f, i))}>Claim</button>}
+                  {done && <button className="btn-gold mt-1 w-full !py-0.5 text-sm" onClick={() => act({ type: 'claimTask', index: i })}>Claim</button>}
                 </div>
               );
             })}
           </div>
+        </Card>
+        <Card className="md:col-span-2">
+          <b className="mb-1 block">Village activity</b>
+          {activity.length
+            ? <ul className="m-0 list-none p-0 text-sm">{activity.slice(0, 6).map(f => <li key={`${f.at}-${f.text}`} className="flex justify-between gap-2 py-0.5"><span>{f.text}</span><span className="shrink-0 text-xs text-muted">{new Date(f.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></li>)}</ul>
+            : <p className="m-0 text-sm text-muted">Quiet so far. Big harvests, level-ups and new land from every farm show up here as they happen.</p>}
         </Card>
       </div>
     </Window>
@@ -134,7 +143,7 @@ export function EquipmentPanel() {
           {level > 0 && level < rule.maxLevel && <div className="text-sm text-muted">Next: {rule.describe(level + 1)}</div>}
           <div className="mt-auto flex flex-wrap gap-1.5">
             {!level && <button className="btn-gold" onClick={() => open('shop', 'machinery')}>Buy in Marketplace</button>}
-            {level > 0 && level < rule.maxLevel && <button className="btn-gold" disabled={farm.coins < cost} onClick={() => act(f => upgradeMachine(f, pick))}>Upgrade · {cost.toLocaleString('en-US')} coins</button>}
+            {level > 0 && level < rule.maxLevel && <button className="btn-gold" disabled={farm.coins < cost} onClick={() => act({ type: 'upgrade', machine: pick })}>Upgrade · {cost.toLocaleString('en-US')} coins</button>}
             {level > 0 && level >= rule.maxLevel && pick !== 'mach-storage' && <span className="text-sm text-muted">{rule.maxLevel > 1 ? 'Maximum level' : 'Owned'}</span>}
           </div>
         </Card>
@@ -161,8 +170,8 @@ export function LivestockPanel({ tab = 'all' }: { tab?: string }) {
         <b>{farm.animals.length} animals</b><span className="text-muted">· {ready} ready · {hungry} hungry</span>
         {tab !== 'all' && <span className="text-muted">· space {farm.animals.filter(a => a.kind === tab).length}/{animalCapacity(farm, tab as AnimalType)}</span>}
         <span className="ml-auto flex gap-1.5">
-          <button className="btn-gold !py-0.5" disabled={!ready} onClick={() => act(f => collectAll(f))}>Collect all</button>
-          <button className="btn-wood !py-0.5" disabled={!hungry} onClick={() => act((f, n) => feedAll(f, n))}>Feed hungry</button>
+          <button className="btn-gold !py-0.5" disabled={!ready} onClick={() => act({ type: 'collectAll' })}>Collect all</button>
+          <button className="btn-wood !py-0.5" disabled={!hungry} onClick={() => act({ type: 'feedAll' })}>Feed hungry</button>
           <button className="btn-wood !py-0.5" onClick={() => open('shop', 'livestock')}>Buy animals</button>
         </span>
       </div>
@@ -180,8 +189,8 @@ export function LivestockPanel({ tab = 'all' }: { tab?: string }) {
                   <span className="text-muted">Fed</span><span className={fed ? '' : 'font-bold text-down'}>{fed ? fmtSecs((a.fedUntil - now) / 1000) : 'Hungry'}</span>
                 </div>
                 <div className="mt-1 flex gap-1">
-                  {a.ready && <button className="btn-gold !px-1.5 !py-0 text-xs" onClick={() => act(f => collect(f, a.id))}>Collect</button>}
-                  <button className="btn-wood !px-1.5 !py-0 text-xs" disabled={!feedLeft} onClick={() => act((f, n) => feed(f, a.id, n))}>Feed ({feedLeft})</button>
+                  {a.ready && <button className="btn-gold !px-1.5 !py-0 text-xs" onClick={() => act({ type: 'collect', animal: a.id })}>Collect</button>}
+                  <button className="btn-wood !px-1.5 !py-0 text-xs" disabled={!feedLeft} onClick={() => act({ type: 'feed', animal: a.id })}>Feed ({feedLeft})</button>
                 </div>
               </div>
             </Card>

@@ -50,8 +50,13 @@ export function ViewControls() {
   return (
     <div className="panel pointer-events-auto absolute right-2.5 bottom-2.5 hidden w-[262px] px-3 py-2.5 lg:block">
       <div className="flex items-center justify-between">
-        <b className="text-base">Stage 5 · Core gameplay</b>
+        <b className="text-base">Stage 6 · Online farm</b>
         <a href="/concept/index.html" className="text-xs text-muted underline">Stage 1 art</a>
+      </div>
+      <div className="mt-1 flex items-center justify-between gap-2 text-xs">
+        {env.live
+          ? <span className="text-muted">Live world clock · shared by every farm</span>
+          : <><span className="font-semibold text-down">Preview — visuals only</span><button className="btn-gold !px-1.5 !py-0.5 text-xs" onClick={() => commandEnv({ live: true })}>Back to live</button></>}
       </div>
       <div className="mt-1 flex items-center gap-2">
         <Icon name={env.night > .5 ? 'moon' : 'sun'} size={18} />
@@ -59,13 +64,13 @@ export function ViewControls() {
         <b className="w-11 text-right text-sm">{formatHour(env.hour)}</b>
       </div>
       <div className="mt-1.5 flex gap-1" role="group" aria-label="Time speed">
-        {SPEEDS.map(([v, l]) => <button key={v} className={chip(env.speed === v)} onClick={() => commandEnv({ speed: v })} aria-pressed={env.speed === v}>{l}</button>)}
+        {SPEEDS.map(([v, l]) => <button key={v} className={chip(!env.live && env.speed === v)} onClick={() => commandEnv({ speed: v })} aria-pressed={env.speed === v}>{l}</button>)}
       </div>
       <div className="mt-1.5 flex gap-1" role="group" aria-label="Weather">
-        {WEATHER_BTNS.map(([w, i]) => <button key={w} className={`${chip(env.weather === w)} grid place-items-center`} onClick={() => commandEnv({ weather: w })} aria-pressed={env.weather === w} title={WEATHER_LABEL[w]}><Icon name={i} size={18} /></button>)}
+        {WEATHER_BTNS.map(([w, i]) => <button key={w} className={`${chip(!env.live && env.weather === w)} grid place-items-center`} onClick={() => commandEnv({ weather: w })} aria-pressed={env.weather === w} title={WEATHER_LABEL[w]}><Icon name={i} size={18} /></button>)}
       </div>
       <div className="mt-1.5 grid grid-cols-4 gap-1" role="group" aria-label="Season">
-        {SEASONS.map(s => <button key={s} className={chip(env.season === s)} onClick={() => commandEnv({ season: s })} aria-pressed={env.season === s}>{SEASON_NAME[s]}</button>)}
+        {SEASONS.map(s => <button key={s} className={chip(!env.live && env.season === s)} onClick={() => commandEnv({ season: s })} aria-pressed={env.season === s}>{SEASON_NAME[s]}</button>)}
       </div>
       <div className="mt-2 mb-1.5 flex items-center justify-between border-t-2 border-dashed border-parch-d pt-1.5"><ApiStatus /><span className="text-xs text-muted">Drag · WASD · scroll</span></div>
       <div className="flex items-center gap-1.5">

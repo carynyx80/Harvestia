@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PLOTS } from '../world/geometry';
+import { PLOTS } from '../geometry';
 import {
   buy, cellsOf, claimTask, collect, feed, harvest, plant, refill, sell, stageOf, storageCapacity, storageUsed, tick, upgradeMachine, water,
   type Conditions,
@@ -165,5 +165,35 @@ describe('economy', () => {
     const r = claimTask(s, 0);
     expect(r.state.coins).toBeGreaterThan(s.coins);
     expect(r.state.tasks[0].id).not.toBe('t-plant');
+  });
+});
+
+describe('actions and world clock', async () => {
+  const { applyAction, parseAction } = await import('./actions');
+  const { worldAt } = await import('../world');
+
+  it('parses only well-formed actions', () => {
+    expect(parseAction({ type: 'plant', plot: 15, cell: 0, seed: 'seed-wheat' })).toEqual({ type: 'plant', plot: 15, cell: 0, seed: 'seed-wheat' });
+    expect(parseAction({ type: 'plant', plot: 15, cell: 0, seed: 'seed-gold' })).toBeNull();
+    expect(parseAction({ type: 'buy', item: 'seed-wheat', qty: 1e9 })).toBeNull();
+    expect(parseAction({ type: 'sell', item: 'crop-wheat', qty: 1, coins: 999999 })).toBeNull(); // extra fields rejected
+    expect(parseAction({ type: 'feed', animal: '../etc' })).toBeNull();
+    expect(parseAction({ type: 'setCoins', coins: 1e9 })).toBeNull();
+    expect(parseAction('plant')).toBeNull();
+  });
+
+  it('applies a parsed action through the engine', () => {
+    const r = applyAction(farm(), parseAction({ type: 'buy', item: 'seed-corn', qty: 2 })!, T0, SUNNY);
+    expect(r.error).toBeUndefined();
+    expect(r.state.coins).toBe(1250 - 16);
+  });
+
+  it('world clock is deterministic and advances days and seasons', () => {
+    const a = worldAt(T0), b = worldAt(T0);
+    expect(a).toEqual(b);
+    expect(a.hour).toBeGreaterThanOrEqual(0); expect(a.hour).toBeLessThan(24);
+    const later = worldAt(T0 + 300_000 * 7);
+    expect(later.day).toBe(a.day + 7);
+    expect(later.season).not.toBe(a.season);
   });
 });

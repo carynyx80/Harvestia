@@ -6,7 +6,19 @@
 
 Harvestia is a browser-based pixel-art farming game with an agricultural economy referenced to real commodity markets and a $HRV token economy (Robinhood Chain first, BNB Chain later).
 
-## Current stage: 5 — Core gameplay
+## Current stage: 6 — Backend
+
+Every farm now lives on the server:
+
+- **Accounts:** the first visit creates a guest account (a random token kept in the browser; only its SHA-256 hash is stored). Wallet sign-in arrives in Stage 8 and will never ask for a seed phrase or private key.
+- **Server-authoritative play:** the browser sends actions such as `{ type: 'plant', plot, cell, seed }`, never a new state. The API checks each one against a strict schema, advances the farm's timers by server time, applies the action with the same rules code the browser uses (`shared/`), and stores the result in PostgreSQL inside a row-locked transaction. The browser predicts the result for instant feedback, then adopts the server's answer.
+- **Anti-cheat:** per-farm sequence numbers reject replays and duplicates, forged or unknown actions are refused, there's a body size limit, rate limits apply per player and per IP, and action bursts are flagged for review. Every action is written to an audit log.
+- **Shared world clock:** day, season and weather follow one schedule (5-minute days, 7-day seasons) computed identically by server and browser. The review panel's weather, time and season buttons are now a visual-only preview with a "Back to live" button.
+- **Jobs and multiplayer foundations:** BullMQ on Redis refreshes the leaderboard every minute and cleans up expired sessions nightly. A WebSocket channel shows how many farmers are online and a village activity feed (level-ups, big harvests, new land). It fans out across instances through Redis pub/sub.
+- **Offline:** if the server can't be reached the farm keeps running locally and the HUD shows it is offline. Queued actions are retried in order.
+
+### Stage 5 — Core gameplay
+
 
 The farm is playable with simulated **Farm Coins** (100 coins = $1 reference):
 
@@ -15,9 +27,9 @@ The farm is playable with simulated **Farm Coins** (100 coins = $1 reference):
 - **Machinery:** buy machines and level them up (can capacity, pump coverage, tractor growth bonus, harvester bonus, storage).
 - **Farm upgrades:** unlock the expansion plots, enrich a field with fertile soil (+1 per plant) or dig an irrigation channel, and add coops, shelters, barns and silos for more space.
 - **Progress:** XP and levels unlock crops (coffee at 5, cocoa at 6). Rotating tasks pay coins and XP. Selling in the inventory uses fixed store prices.
-- **Saving:** autosaves in the browser. Timers keep running while you are away and catch up on return; you can reset from the profile.
+- **Saving:** on the server since Stage 6. Timers keep running while you are away and catch up on return; you can reset from the profile.
 
-The rules live in `src/game/sim/` as pure, deterministic functions (with unit tests), so the Stage 6 server can run the same code and become authoritative for timers and saves.
+The rules live in `shared/sim/` as pure, deterministic functions (with unit tests), shared by the browser and the server.
 
 ### Stage 4 — Game UI
 
@@ -78,7 +90,9 @@ The Stage 1 concept and art-direction sheet stay available at `/concept/index.ht
 | `src/components/hud/` | React HUD |
 | `src/components/panels/`, `src/components/ui/` | Game windows and the pixel UI kit |
 | `src/game/data/` | Item catalog, economy rules, simulated market, demo data |
-| `src/game/sim/` | Farm rules, state model, engine actions and tests |
+| `shared/` | Rules, actions, catalog, world clock and geometry shared by client and server |
+| `src/lib/sync.ts` | Client prediction, ordered action queue and server reconciliation |
+| `server/` | API, Prisma schema and migrations, jobs, live channel |
 
 ## Architecture
 
@@ -86,8 +100,10 @@ The Stage 1 concept and art-direction sheet stay available at `/concept/index.ht
 |---|---|---|
 | Frontend: Next.js + Phaser game client | Vercel, https://harvestia-one.vercel.app | repo root |
 | Backend API: Fastify + TypeScript | Railway, https://harvestia-api.up.railway.app | `server/` |
+| Database: PostgreSQL (Prisma) | Railway | `server/prisma/` |
+| Queue, cache, pub/sub: Redis (BullMQ) | Railway | `server/src/jobs.ts`, `server/src/live.ts` |
 
-The API currently exposes `GET /health` and `GET /v1/status`. Player accounts, persistent farm state, PostgreSQL, Redis and job queues arrive in Stage 6. CORS only allows the Vercel site, its preview deployments and local dev.
+API routes: `GET /health`, `GET /v1/status`, `GET /v1/world`, `POST /v1/auth/guest`, `GET /v1/me`, `GET /v1/farm`, `POST /v1/farm/actions`, `POST /v1/farm/reset`, `GET /v1/leaderboard`, `GET /v1/farms/:id`, and the WebSocket `/v1/live`. CORS only allows the Vercel site, its preview deployments and local dev.
 
 ## Develop
 
@@ -95,7 +111,8 @@ The API currently exposes `GET /health` and `GET /v1/status`. Player accounts, p
 npm install && npm --prefix server install
 npm run dev        # frontend on http://localhost:5180
 npm test           # game rules tests
-npm run api:dev    # API on http://127.0.0.1:4000
+npm --prefix server run db:local   # throwaway PostgreSQL on :54331 (no Docker needed)
+npm run api:dev    # API on http://127.0.0.1:4000 (set DATABASE_URL; without it the API uses an in-memory store)
 npm run api:test   # API tests
 ```
 
@@ -104,7 +121,7 @@ Copy `.env.example` to `.env.local` and point `NEXT_PUBLIC_API_URL` at `http://1
 ## Deploy
 
 - **Vercel** builds the Next.js app from the repo root; `server/` is excluded via `.vercelignore`.
-- **Railway** builds the service from the `server/` root directory (`npm run build`, then `npm run start`), health-checked on `/health`. It redeploys only when files under `server/` change.
+- **Railway** builds the API from `server/Dockerfile` with the repo root as context (so `shared/` is bundled in), runs `prisma migrate deploy` on start, and is health-checked on `/health`. It redeploys when `server/` or `shared/` change. `DATABASE_URL` and `REDIS_URL` reference the project's Postgres and Redis services.
 
 ## Roadmap
 
@@ -114,8 +131,8 @@ Development is stage-gated; each stage ships only after explicit approval.
 2. Playable world ✓
 3. Animation polish ✓
 4. Game UI ✓
-5. Core gameplay ← current
-6. Backend
+5. Core gameplay ✓
+6. Backend ← current
 7. Commodity economy
 8. Blockchain
 9. Buybacks and rewards

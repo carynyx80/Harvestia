@@ -1,0 +1,9 @@
+**/node_modules
+**/.next
+**/dist
+server/.pgdata
+.git
+.env*
+public
+src
+concept

@@ -30,7 +30,7 @@ function WeatherPill() {
     : env.weather === 'sunny' ? (env.night > .5 ? 'moon' : 'sun')
     : env.weather === 'cloudy' ? 'cloud' : env.weather === 'rainy' ? 'rain' : env.weather === 'stormy' ? 'storm' : 'drought';
   const label = isSnowing(env.season, env.weather) ? 'Snow' : WEATHER_LABEL[env.weather];
-  return <Pill icon={icon} label={`${SEASON_LABEL[env.season]} · Day ${env.day}`} value={`${label} ${env.temp}° · ${formatHour(env.hour)}`} tone="white" title="Weather affects crop growth once core gameplay arrives" />;
+  return <Pill icon={icon} label={`${SEASON_LABEL[env.season]} · Day ${env.seasonDay}${env.live ? '' : ' · preview'}`} value={`${label} ${env.temp}° · ${formatHour(env.hour)}`} tone="white" title={env.live ? 'Shared world weather — every farm has the same sky' : 'Preview only — your crops still follow the real world weather'} />;
 }
 
 export function TopBar() {

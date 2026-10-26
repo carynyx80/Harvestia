@@ -1,4 +1,5 @@
 // Game clock plus smoothly blended weather values every other system reads.
+import { worldAt } from '../../../shared/world';
 import {
   DAY_SECONDS, WEATHER_LOOK, isSnowing, lerp, mixRgb, nightness, rgb, skyColor, temperature,
   type EnvSnapshot, type Season, type Weather,
@@ -12,6 +13,12 @@ export class EnvironmentSystem {
   season: Season = 'spring';
   weather: Weather = 'sunny';
   speed = 1;
+  seasonDay = 1;
+  year = 1;
+  /** true: follows the shared world clock (what the game rules use); false: review-panel preview */
+  live = true;
+  /** server clock minus local clock */
+  offset = 0;
 
   // blended toward the active weather so changes fade in and out
   wind = WEATHER_LOOK.sunny.wind;
@@ -29,8 +36,14 @@ export class EnvironmentSystem {
   get snowing() { return isSnowing(this.season, this.weather); }
 
   update(dt: number) {
-    this.hour += dt * this.speed * 24 / DAY_SECONDS;
-    if (this.hour >= 24) { this.hour -= 24; this.day++; }
+    if (this.live) {
+      const w = worldAt(Date.now() + this.offset);
+      this.hour = w.hour; this.day = w.day; this.seasonDay = w.seasonDay; this.year = w.year;
+      this.season = w.season; this.weather = w.weather; this.speed = 1;
+    } else {
+      this.hour += dt * this.speed * 24 / DAY_SECONDS;
+      if (this.hour >= 24) { this.hour -= 24; this.day++; }
+    }
     const look = WEATHER_LOOK[this.weather];
     const k = 1 - Math.exp(-dt * .9);
     this.wind = lerp(this.wind, look.wind, k);
@@ -50,7 +63,8 @@ export class EnvironmentSystem {
 
   snapshot(): EnvSnapshot {
     return {
-      hour: Math.floor(this.hour * 60) / 60, day: this.day, season: this.season, weather: this.weather, speed: this.speed,
+      hour: Math.floor(this.hour * 60) / 60, day: this.day, seasonDay: this.seasonDay, year: this.year, live: this.live,
+      season: this.season, weather: this.weather, speed: this.speed,
       temp: temperature(this.season, this.weather, this.hour), night: Math.round(this.night * 100) / 100,
     };
   }

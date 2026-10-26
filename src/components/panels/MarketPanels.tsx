@@ -5,6 +5,7 @@ import HV from '@/game/art/sprites';
 import { COMMODITIES, change, orderBook, recentTrades, series, virtualPrice } from '@/game/data/market';
 import { EXCHANGE_FEE, VAULT_FEES } from '@/game/data/economy';
 import { useGame } from '@/store/game';
+import { getLeaderboard, type LeaderRow } from '@/lib/api';
 import { Card, SimTag, SpriteThumb, StageButton, Window } from '@/components/ui/kit';
 import { Icon } from '@/components/hud/Icon';
 
@@ -156,16 +157,19 @@ export function CoopPanel() {
 }
 
 export function CompetitionsPanel() {
-  const close = useGame(s => s.closePanel);
-  const rows = [['Meadow Folk', 98420], ['Golden Sheaf', 91310], ['Sunny Acres (you)', 64880], ['Bean Counters', 60210], ['River Valley', 55990]] as const;
+  const close = useGame(s => s.closePanel), me = useGame(s => s.session?.farmId);
+  const [board, setBoard] = useState<{ rows: LeaderRow[]; updatedAt: number } | null | 'error'>(null);
+  useEffect(() => { let alive = true; getLeaderboard().then(b => alive && setBoard(b), () => alive && setBoard('error')); return () => { alive = false; }; }, []);
   return (
     <Window title="Competitions" icon="trophy" onClose={close} width={700} footer="Competitions use non-redeemable play credits. Token wagering stays disabled pending legal review.">
       <div className="mb-2"><SimTag>PREVIEW · STAGE 10</SimTag></div>
       <div className="grid gap-3 sm:grid-cols-2">
         <Card><b className="mb-1 block">Autumn harvest race</b><p className="m-0 text-sm">Harvest the most wheat in 10 game-minutes. Starts in 2 days.</p><div className="mt-2"><StageButton stage={10} gold>Enter (play credits)</StageButton></div></Card>
         <Card>
-          <b className="mb-1 block">Season leaderboard</b>
-          <ol className="m-0 list-none p-0 text-sm">{rows.map(([n, s], k) => <li key={n} className={`flex justify-between py-0.5 ${n.includes('you') ? 'font-bold' : ''}`}><span>{k + 1}. {n}</span><span>{s.toLocaleString('en-US')}</span></li>)}</ol>
+          <b className="mb-1 block">Farm leaderboard <span className="text-xs font-normal text-muted">· live, by level and XP</span></b>
+          {board === null ? <p className="m-0 text-sm text-muted">Loading…</p>
+            : board === 'error' ? <p className="m-0 text-sm text-down">Leaderboard unavailable — the farm server can&apos;t be reached.</p>
+            : <ol className="m-0 list-none p-0 text-sm">{board.rows.slice(0, 10).map((r, k) => <li key={r.farmId} className={`flex justify-between gap-2 py-0.5 ${r.farmId === me ? 'font-bold' : ''}`}><span>{k + 1}. {r.name}{r.farmId === me ? ' (you)' : ''}</span><span>Lv {r.level} · {r.xp.toLocaleString('en-US')} XP</span></li>)}</ol>}
         </Card>
       </div>
     </Window>

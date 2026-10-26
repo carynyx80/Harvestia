@@ -1,26 +1,12 @@
 'use client';
-import { useEffect, useState } from 'react';
-import { API_URL, fetchStatus } from '@/lib/api';
+import { API_URL } from '@/lib/api';
+import { useGame } from '@/store/game';
 
-type State = { kind: 'checking' } | { kind: 'online'; env: string; commit: string } | { kind: 'offline' };
-
-/** Small connection light for the backend API; re-checks every minute. */
+/** Connection light for the farm server, with how many farmers are online. */
 export function ApiStatus() {
-  const [state, setState] = useState<State>({ kind: 'checking' });
-  useEffect(() => {
-    let alive = true;
-    const check = async () => {
-      const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), 6000);
-      try { const s = await fetchStatus(ctrl.signal); if (alive) setState({ kind: 'online', env: s.environment, commit: s.commit }); }
-      catch { if (alive) setState({ kind: 'offline' }); }
-      finally { clearTimeout(timer); }
-    };
-    void check();
-    const id = setInterval(check, 60_000);
-    return () => { alive = false; clearInterval(id); };
-  }, []);
-  const dot = state.kind === 'online' ? 'bg-[#4ce06a]' : state.kind === 'offline' ? 'bg-down' : 'bg-gold animate-pulse';
-  const text = state.kind === 'online' ? `API online · ${state.commit}` : state.kind === 'offline' ? 'API offline' : 'Checking API…';
+  const connection = useGame(s => s.connection), online = useGame(s => s.live.online);
+  const dot = connection === 'online' ? 'bg-[#4ce06a]' : connection === 'offline' ? 'bg-down' : 'bg-gold animate-pulse';
+  const text = connection === 'online' ? `Online · ${online} farmer${online === 1 ? '' : 's'} here` : connection === 'offline' ? 'Offline · retrying' : 'Connecting…';
   return (
     <span className="flex items-center gap-1.5 text-xs text-muted" title={API_URL}>
       <i className={`inline-block size-2 border border-wood-d ${dot}`} />{text}
