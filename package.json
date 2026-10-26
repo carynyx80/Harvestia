@@ -12,7 +12,8 @@
     "start": "next start -H 0.0.0.0 -p ${PORT:-3000}",
     "typecheck": "tsc --noEmit",
     "api:dev": "npm --prefix server run dev",
-    "api:test": "npm --prefix server test"
+    "api:test": "npm --prefix server test",
+    "test": "vitest run"
   },
   "dependencies": {
     "next": "15.5.28",
@@ -27,6 +28,7 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "tailwindcss": "4.3.3",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
   }
 }

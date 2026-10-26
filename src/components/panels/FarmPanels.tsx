@@ -1,40 +1,52 @@
 'use client';
-// Player profile, farm overview, equipment and livestock windows.
-import { useCallback, useState } from 'react';
+// Player profile, farm overview, equipment and livestock windows — all on live farm state.
+import { useState } from 'react';
 import HV from '@/game/art/sprites';
 import { ITEM } from '@/game/data/items';
-import { ACHIEVEMENTS, ANIMALS, MACHINES, PLAYER, TASKS, type Animal } from '@/game/data/demo';
-import { fmtHrv, fmtUsd, toHrv } from '@/game/data/economy';
-import { PLOTS, STAGE_NAMES } from '@/game/world/geometry';
+import { ACHIEVEMENTS } from '@/game/data/demo';
+import { STAGE_NAMES } from '@/game/world/geometry';
 import { WEATHER_LABEL, formatHour } from '@/game/env/environment';
+import { ANIMAL_RULES, MACHINE_RULES, xpForLevel, type AnimalType } from '@/game/sim/rules';
+import { animalCapacity, claimTask, collect, collectAll, feed, feedAll, growthRate, stageOf, taskProgress, upgradeMachine } from '@/game/sim/engine';
+import { clearSave, initialState } from '@/game/sim/state';
 import { useGame } from '@/store/game';
-import { Bar, Card, ItemIcon, SimTag, SpriteThumb, StageButton, Window } from '@/components/ui/kit';
+import { Bar, Card, ItemIcon, SpriteThumb, Window } from '@/components/ui/kit';
 import { Icon } from '@/components/hud/Icon';
+import { fmtSecs } from '@/components/hud/Inspector';
 
 const MEDAL = { gold: '#e3b341', silver: '#c9ced6', bronze: '#c87a3a' };
 const drawAvatar = () => HV.farmer(0, 0, 0, false, { shirt: '#c4553b', pants: '#3f6fa8' }, 'front');
+const STAT_LABEL: [string, string][] = [['planted', 'Crops planted'], ['harvested', 'Crops harvested'], ['watered', 'Rows watered'], ['collected', 'Products collected'], ['earned', 'Coins earned'], ['spent', 'Coins spent']];
 
 export function ProfilePanel() {
-  const close = useGame(s => s.closePanel), open = useGame(s => s.openPanel);
+  const close = useGame(s => s.closePanel), open = useGame(s => s.openPanel), farm = useGame(s => s.farm), setFarm = useGame(s => s.setFarm), toast = useGame(s => s.toast);
+  const [confirmReset, setConfirmReset] = useState(false);
+  if (!farm) return null;
+  // early achievements follow live stats; the rest unlock in later stages
+  const got = (name: string) => name === 'First Harvest' ? (farm.stats.harvested ?? 0) > 0 : name === 'Mechanised' ? !!farm.machines['mach-tractor'] : name === 'Rancher' ? (['chicken', 'sheep', 'pig', 'cow'] as AnimalType[]).every(k => farm.animals.some(a => a.kind === k)) : name === 'Green Thumb' ? (farm.stats.planted ?? 0) >= 50 : false;
   return (
-    <Window title="Farmer profile" icon="home" onClose={close} width={760} footer="Profile data is a demo until accounts arrive in Stage 6. Wallet ownership is proven by signing a one-time message — never by a seed phrase or private key.">
+    <Window title="Farmer profile" icon="home" onClose={close} width={760} footer="Saved in this browser until accounts arrive in Stage 6. Wallet ownership will be proven by signing a one-time message — never by a seed phrase or private key.">
       <div className="grid gap-3 md:grid-cols-[220px_1fr]">
         <Card className="flex flex-col items-center gap-2 text-center">
           <div className="grid h-28 w-full place-items-center border-2 border-wood bg-[#9fd3e6] shadow-[inset_0_-24px_0_#5fb44b]"><SpriteThumb draw={drawAvatar} box={96} maxScale={6} /></div>
-          <b className="text-xl">{PLAYER.farm}</b>
-          <span className="text-sm text-muted">{PLAYER.farmer} · since {PLAYER.joined}</span>
-          <div className="w-full text-left text-sm"><div className="flex justify-between"><b>Level {PLAYER.level}</b><span className="text-muted">{PLAYER.xp} / {PLAYER.xpNext} XP</span></div><Bar value={PLAYER.xp / PLAYER.xpNext} /></div>
+          <b className="text-xl">Sunny Acres</b>
+          <span className="text-sm text-muted">Guest farmer</span>
+          <div className="w-full text-left text-sm"><div className="flex justify-between"><b>Level {farm.level}</b><span className="text-muted">{farm.xp} / {xpForLevel(farm.level)} XP</span></div><Bar value={farm.xp / xpForLevel(farm.level)} /></div>
+          <div className="w-full text-left text-sm"><b>{farm.coins.toLocaleString('en-US')}</b> Farm Coins</div>
           <button className="btn-gold w-full" onClick={() => open('wallet')}>Wallet & Game Vault</button>
+          {confirmReset
+            ? <div className="flex w-full gap-1"><button className="btn-wood flex-1 !px-1 text-xs" onClick={() => setConfirmReset(false)}>Keep farm</button><button className="btn-wood flex-1 !bg-down !px-1 text-xs" onClick={() => { clearSave(); setFarm(initialState(Date.now())); setConfirmReset(false); toast('Farm reset to the starter farm', 'info'); }}>Reset</button></div>
+            : <button className="text-xs text-muted underline" onClick={() => setConfirmReset(true)}>Start over (reset farm)</button>}
         </Card>
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {PLAYER.stats.map(([k, v]) => <Card key={k}><div className="text-xs text-muted">{k}</div><b className="text-lg">{v}</b></Card>)}
+            {STAT_LABEL.map(([k, label]) => <Card key={k}><div className="text-xs text-muted">{label}</div><b className="text-lg">{(farm.stats[k] ?? 0).toLocaleString('en-US')}</b></Card>)}
           </div>
           <div>
             <b className="mb-1 block">Achievements</b>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {ACHIEVEMENTS.map(a => (
-                <Card key={a.name} className={`text-center ${a.got ? '' : 'opacity-55 grayscale'}`}>
+                <Card key={a.name} className={`text-center ${got(a.name) ? '' : 'opacity-55 grayscale'}`}>
                   <div className="mx-auto mb-1 grid size-9 place-items-center rounded-full border-2 border-wood-d" style={{ background: MEDAL[a.tier] }}><Icon name="trophy" size={20} /></div>
                   <b className="block text-sm leading-tight">{a.name}</b><span className="text-[11px] leading-tight text-muted">{a.desc}</span>
                 </Card>
@@ -48,36 +60,43 @@ export function ProfilePanel() {
 }
 
 export function FarmPanel() {
-  const close = useGame(s => s.closePanel), open = useGame(s => s.openPanel), env = useGame(s => s.env);
-  const fields = PLOTS.filter(p => p.kind !== 'expansion');
-  const byStage = [0, 1, 2, 3].map(st => fields.filter(p => p.crop && p.kind !== 'watered' && p.stage === st).length);
-  const locked = PLOTS.length - fields.length;
+  const close = useGame(s => s.closePanel), open = useGame(s => s.openPanel), env = useGame(s => s.env), farm = useGame(s => s.farm), act = useGame(s => s.act);
+  if (!farm) return null;
+  const fields = farm.plots.filter(p => p.unlocked);
+  const byStage = [0, 1, 2, 3].map(st => fields.reduce((n, p) => n + p.cells.filter(c => c.crop && stageOf(c.growth) === st).length, 0));
+  const empty = fields.reduce((n, p) => n + p.cells.filter(c => !c.crop).length, 0);
+  const rate = growthRate(farm, { weather: env.weather, season: env.season });
   return (
-    <Window title="My farm" icon="home" onClose={close} width={760} footer="Field stages come from the live world; tasks and totals are demo data until core gameplay (Stage 5).">
+    <Window title="My farm" icon="home" onClose={close} width={760} footer="Crops only grow while their soil is wet. Rain waters every field; the irrigation pump and irrigation channels keep their fields wet.">
       <div className="grid gap-3 md:grid-cols-2">
         <Card>
-          <b className="mb-1 block">Fields</b>
-          <div className="grid grid-cols-4 gap-1.5 text-center">
+          <b className="mb-1 block">Crops</b>
+          <div className="grid grid-cols-5 gap-1.5 text-center">
+            <div className="border-2 border-parch-d bg-parch p-1"><b className="block text-xl">{empty}</b><span className="text-[11px] text-muted">Empty</span></div>
             {STAGE_NAMES.map((n, i) => <div key={n} className="border-2 border-parch-d bg-parch p-1"><b className="block text-xl">{byStage[i]}</b><span className="text-[11px] text-muted">{n}</span></div>)}
           </div>
-          <div className="mt-2 flex justify-between text-sm"><span>{fields.length} fields · {locked} locked expansion plots</span><button className="text-xs underline" onClick={() => open('shop', 'land')}>Buy land</button></div>
+          <div className="mt-2 flex justify-between text-sm"><span>{fields.length} fields · {farm.plots.length - fields.length} locked</span><button className="text-xs underline" onClick={() => open('shop', 'land')}>Buy land</button></div>
         </Card>
         <Card>
           <b className="mb-1 block">Today</b>
           <div className="flex items-center gap-2 text-sm"><Icon name={env.night > .5 ? 'moon' : 'sun'} size={22} />{env.season[0].toUpperCase() + env.season.slice(1)}, day {env.day} · {WEATHER_LABEL[env.weather]} {env.temp}° · {formatHour(env.hour)}</div>
-          <ul className="m-0 mt-2 list-none p-0 text-sm">
-            {TASKS.map(t => <li key={t.text} className="flex items-center gap-2 py-0.5"><span className={`grid size-4 place-items-center border-2 border-wood-d text-[10px] ${t.done ? 'bg-leaf text-white' : 'bg-parch'}`}>{t.done ? '✓' : ''}</span><span className={t.done ? 'text-muted line-through' : ''}>{t.text}</span></li>)}
-          </ul>
+          <div className="mt-1 text-sm">Growth speed right now: <b className={rate >= 1 ? 'text-up' : 'text-down'}>{Math.round(rate * 100)}%</b></div>
+          <div className="mt-1 text-xs text-muted">Weather, season and your tractor all change how fast crops grow.</div>
         </Card>
         <Card className="md:col-span-2">
-          <b className="mb-1 block">Shortcuts</b>
-          <div className="flex flex-wrap gap-1.5">
-            <button className="btn-wood" onClick={() => open('inventory')}>Inventory (I)</button>
-            <button className="btn-wood" onClick={() => open('livestock')}>Livestock (L)</button>
-            <button className="btn-wood" onClick={() => open('equipment')}>Equipment (M)</button>
-            <button className="btn-wood" onClick={() => open('shop', 'seeds')}>Shop (B)</button>
-            <button className="btn-wood" onClick={() => open('exchange')}>Exchange (E)</button>
-            <StageButton stage={5} gold>Harvest all ready</StageButton>
+          <b className="mb-1 block">Tasks</b>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {farm.tasks.map((_, i) => {
+              const { rule, value } = taskProgress(farm, i), done = value >= rule.target;
+              return (
+                <div key={`${rule.id}-${i}`} className={`border-2 p-2 ${done ? 'border-leaf bg-[#e6f2d0]' : 'border-parch-d bg-parch'}`}>
+                  <b className="block text-sm">{rule.text}</b>
+                  <Bar value={value / rule.target} className="my-1" />
+                  <div className="flex items-center justify-between text-xs"><span>{value} / {rule.target}</span><span className="text-muted">+{rule.coins} coins · +{rule.xp} XP</span></div>
+                  {done && <button className="btn-gold mt-1 w-full !py-0.5 text-sm" onClick={() => act(f => claimTask(f, i))}>Claim</button>}
+                </div>
+              );
+            })}
           </div>
         </Card>
       </div>
@@ -85,69 +104,90 @@ export function FarmPanel() {
   );
 }
 
+const MACHINE_ORDER = ['mach-tractor', 'mach-harvester', 'mach-pump', 'mach-can', 'mach-planter', 'mach-storage', 'mach-mill'];
+
 export function EquipmentPanel() {
-  const close = useGame(s => s.closePanel), open = useGame(s => s.openPanel);
-  const [pick, setPick] = useState(MACHINES[0].id);
-  const m = MACHINES.find(x => x.id === pick)!, item = ITEM[m.item];
+  const close = useGame(s => s.closePanel), open = useGame(s => s.openPanel), farm = useGame(s => s.farm), act = useGame(s => s.act);
+  const [pick, setPick] = useState(MACHINE_ORDER[0]);
+  if (!farm) return null;
+  const item = ITEM[pick], level = farm.machines[pick] ?? 0, rule = MACHINE_RULES[pick];
+  const cost = level && level < rule.maxLevel ? rule.upgrade(level) : 0;
   return (
-    <Window title="Equipment" icon="tractor" onClose={close} width={820} footer="Machine levels and condition are demo data. Upgrades are priced in $HRV and capped at the $15 reference limit.">
+    <Window title="Equipment" icon="tractor" onClose={close} width={820} footer="Machines are bought in the Marketplace and levelled up here with Farm Coins.">
       <div className="grid gap-3 md:grid-cols-[1fr_300px]">
         <div className="flex flex-col gap-1.5">
-          {MACHINES.map(x => {
-            const it = ITEM[x.item];
+          {MACHINE_ORDER.map(id => {
+            const it = ITEM[id], lv = farm.machines[id] ?? 0;
             return (
-              <button key={x.id} onClick={() => setPick(x.id)} className={`flex items-center gap-3 border-2 p-2 text-left ${pick === x.id ? 'border-gold bg-[#fff0b8]' : 'border-wood bg-[#e9d29c] hover:bg-parch-l'}`}>
-                <span className="grid size-14 place-items-center"><ItemIcon item={it} size={52} /></span>
-                <span className="flex-1"><b className="block">{it.name} <span className="text-sm font-normal text-muted">Lv {x.level}</span></b><span className="text-xs text-muted">{x.status}</span><Bar value={x.condition} className="mt-1 w-40" color={x.condition < .7 ? '#e8a33a' : '#7cc24c'} /></span>
+              <button key={id} onClick={() => setPick(id)} className={`flex items-center gap-3 border-2 p-2 text-left ${pick === id ? 'border-gold bg-[#fff0b8]' : 'border-wood bg-[#e9d29c] hover:bg-parch-l'} ${lv ? '' : 'opacity-65'}`}>
+                <span className="grid size-12 place-items-center"><ItemIcon item={it} size={44} /></span>
+                <span className="flex-1"><b className="block">{it.name} {lv ? <span className="text-sm font-normal text-muted">{id === 'mach-storage' ? `×${lv}` : `Lv ${lv}`}</span> : null}</b><span className="text-xs text-muted">{lv ? MACHINE_RULES[id].describe(lv) : 'Not owned'}</span></span>
               </button>
             );
           })}
-          <button className="text-left text-sm underline" onClick={() => open('shop', 'machinery')}>Browse machinery in the shop →</button>
         </div>
         <Card className="flex flex-col gap-2">
-          <div className="grid h-24 place-items-center border-2 border-wood bg-[#9fd3e6] shadow-[inset_0_-14px_0_#5fb44b]"><ItemIcon item={item} size={88} /></div>
+          <div className="grid h-24 place-items-center border-2 border-wood bg-[#9fd3e6] shadow-[inset_0_-14px_0_#5fb44b]"><ItemIcon item={item} size={80} /></div>
           <b className="text-lg">{item.name}</b>
-          <div className="text-sm">{item.effect}</div>
-          <div className="flex gap-1">{Array.from({ length: m.maxLevel }, (_, i) => <span key={i} className={`h-3 flex-1 border-2 border-wood-d ${i < m.level ? 'bg-gold' : 'bg-parch'}`} />)}</div>
-          <div className="flex justify-between text-sm"><span className="text-muted">Condition</span><b>{Math.round(m.condition * 100)}%</b></div>
-          <div className="flex justify-between text-sm"><span className="text-muted">Next upgrade</span><b>{m.level < m.maxLevel ? `${fmtHrv(toHrv(m.upgradeUsd))} ≈ ${fmtUsd(m.upgradeUsd)}` : 'Max level'}</b></div>
-          <div className="mt-auto flex flex-wrap gap-1.5"><StageButton stage={5} gold>Upgrade</StageButton><StageButton stage={5}>Repair</StageButton></div>
+          <div className="text-sm">{level ? rule.describe(level) : item.effect}</div>
+          {rule.maxLevel > 1 && level > 0 && <div className="flex gap-1">{Array.from({ length: rule.maxLevel }, (_, i) => <span key={i} className={`h-3 flex-1 border-2 border-wood-d ${i < level ? 'bg-gold' : 'bg-parch'}`} />)}</div>}
+          {level > 0 && level < rule.maxLevel && <div className="text-sm text-muted">Next: {rule.describe(level + 1)}</div>}
+          <div className="mt-auto flex flex-wrap gap-1.5">
+            {!level && <button className="btn-gold" onClick={() => open('shop', 'machinery')}>Buy in Marketplace</button>}
+            {level > 0 && level < rule.maxLevel && <button className="btn-gold" disabled={farm.coins < cost} onClick={() => act(f => upgradeMachine(f, pick))}>Upgrade · {cost.toLocaleString('en-US')} coins</button>}
+            {level > 0 && level >= rule.maxLevel && pick !== 'mach-storage' && <span className="text-sm text-muted">{rule.maxLevel > 1 ? 'Maximum level' : 'Owned'}</span>}
+          </div>
         </Card>
       </div>
     </Window>
   );
 }
 
-const ANIMAL_DRAW = {
+const ANIMAL_DRAW: Record<AnimalType, () => void> = {
   cow: () => HV.cow(0, 0, 0), sheep: () => HV.sheep(0, 0, 0), pig: () => HV.pig(0, 0, 0), chicken: () => HV.chicken(0, 0, 0),
 };
-const KINDS: { key: 'all' | Animal['kind']; label: string }[] = [{ key: 'all', label: 'All' }, { key: 'cow', label: 'Cows' }, { key: 'sheep', label: 'Sheep' }, { key: 'pig', label: 'Pigs' }, { key: 'chicken', label: 'Chickens' }];
+const KINDS: { key: 'all' | AnimalType; label: string }[] = [{ key: 'all', label: 'All' }, { key: 'cow', label: 'Cows' }, { key: 'sheep', label: 'Sheep' }, { key: 'pig', label: 'Pigs' }, { key: 'chicken', label: 'Chickens' }];
 
 export function LivestockPanel({ tab = 'all' }: { tab?: string }) {
-  const close = useGame(s => s.closePanel), open = useGame(s => s.openPanel);
-  const list = ANIMALS.filter(a => tab === 'all' || a.kind === tab);
-  const draw = useCallback((k: Animal['kind']) => ANIMAL_DRAW[k], []);
-  const ready = ANIMALS.filter(a => a.readyIn === 'Ready').length;
+  const close = useGame(s => s.closePanel), open = useGame(s => s.openPanel), farm = useGame(s => s.farm), act = useGame(s => s.act);
+  if (!farm) return null;
+  const now = Date.now();
+  const list = farm.animals.filter(a => tab === 'all' || a.kind === tab);
+  const ready = farm.animals.filter(a => a.ready).length, hungry = farm.animals.filter(a => a.fedUntil < now).length;
   return (
     <Window title="Livestock" icon="cow" tabs={KINDS} tab={tab} onTab={k => open('livestock', k)} onClose={close} width={820}
-      footer="Health, feeding and production timers are demo values; in Stage 5 they run on server-validated timers.">
-      <div className="mb-2 flex flex-wrap items-center gap-2 text-sm"><b>{ANIMALS.length} animals</b><span className="text-muted">· {ready} products ready to collect</span><span className="ml-auto flex gap-1.5"><StageButton stage={5} gold>Collect all</StageButton><StageButton stage={5}>Feed all</StageButton><button className="btn-wood" onClick={() => open('shop', 'livestock')}>Buy animals</button></span></div>
-      <div className="grid gap-1.5 sm:grid-cols-2">
-        {list.map(a => (
-          <Card key={a.name} className="flex items-center gap-3">
-            <span className="grid size-14 shrink-0 place-items-center border-2 border-wood bg-[#9fd3e6] shadow-[inset_0_-10px_0_#5fb44b]"><SpriteThumb draw={draw(a.kind)} box={44} /></span>
-            <div className="flex-1 text-xs">
-              <div className="flex items-center justify-between"><b className="text-sm">{a.name}</b><span className={`border-2 px-1 ${a.readyIn === 'Ready' ? 'border-leaf bg-[#e6f2d0] font-bold text-up' : 'border-parch-d text-muted'}`}>{a.product}: {a.readyIn}</span></div>
-              <div className="mt-1 grid grid-cols-[52px_1fr] items-center gap-x-2 gap-y-0.5">
-                <span className="text-muted">Health</span><Bar value={a.health} />
-                <span className="text-muted">Happy</span><Bar value={a.happiness} color="#f2a3ae" />
-                <span className="text-muted">Fed</span><Bar value={a.fed} color={a.fed < .5 ? '#e8a33a' : '#e8b93c'} />
-              </div>
-            </div>
-          </Card>
-        ))}
+      footer="Animals produce only while fed. Each bag of feed lasts several production cycles; unfed animals slowly lose health.">
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
+        <b>{farm.animals.length} animals</b><span className="text-muted">· {ready} ready · {hungry} hungry</span>
+        {tab !== 'all' && <span className="text-muted">· space {farm.animals.filter(a => a.kind === tab).length}/{animalCapacity(farm, tab as AnimalType)}</span>}
+        <span className="ml-auto flex gap-1.5">
+          <button className="btn-gold !py-0.5" disabled={!ready} onClick={() => act(f => collectAll(f))}>Collect all</button>
+          <button className="btn-wood !py-0.5" disabled={!hungry} onClick={() => act((f, n) => feedAll(f, n))}>Feed hungry</button>
+          <button className="btn-wood !py-0.5" onClick={() => open('shop', 'livestock')}>Buy animals</button>
+        </span>
       </div>
-      <div className="mt-2"><SimTag>DEMO HERD</SimTag></div>
+      <div className="grid gap-1.5 sm:grid-cols-2">
+        {list.map(a => {
+          const rule = ANIMAL_RULES[a.kind], fed = a.fedUntil > now, feedLeft = farm.inventory[rule.feed] ?? 0;
+          return (
+            <Card key={a.id} className="flex items-center gap-3">
+              <span className="grid size-14 shrink-0 place-items-center border-2 border-wood bg-[#9fd3e6] shadow-[inset_0_-10px_0_#5fb44b]"><SpriteThumb draw={ANIMAL_DRAW[a.kind]} box={44} /></span>
+              <div className="flex-1 text-xs">
+                <div className="flex items-center justify-between gap-1"><b className="text-sm">{a.name}</b><span className={`border-2 px-1 ${a.ready ? 'border-leaf bg-[#e6f2d0] font-bold text-up' : 'border-parch-d text-muted'}`}>{ITEM[rule.product].name}: {a.ready ? 'Ready' : fed ? fmtSecs(rule.cycle - a.progress) : 'paused'}</span></div>
+                <div className="mt-1 grid grid-cols-[52px_1fr] items-center gap-x-2 gap-y-0.5">
+                  <span className="text-muted">Health</span><Bar value={a.health} />
+                  <span className="text-muted">Output</span><Bar value={a.progress / rule.cycle} color="#e8b93c" />
+                  <span className="text-muted">Fed</span><span className={fed ? '' : 'font-bold text-down'}>{fed ? fmtSecs((a.fedUntil - now) / 1000) : 'Hungry'}</span>
+                </div>
+                <div className="mt-1 flex gap-1">
+                  {a.ready && <button className="btn-gold !px-1.5 !py-0 text-xs" onClick={() => act(f => collect(f, a.id))}>Collect</button>}
+                  <button className="btn-wood !px-1.5 !py-0 text-xs" disabled={!feedLeft} onClick={() => act((f, n) => feed(f, a.id, n))}>Feed ({feedLeft})</button>
+                </div>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
     </Window>
   );
 }

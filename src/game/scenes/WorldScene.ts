@@ -1,14 +1,17 @@
 // The playable world: terrain, every static object as a depth-sorted atlas
 // image, animated actors from generated sprite sheets, the living environment
 // (day/night, weather, seasons, water, wildlife, crop growth), camera controls
-// and object selection. Game rules arrive in later stages; this scene owns
-// rendering and input only.
+// and object selection. Farm rules live in the sim engine; the scene renders the
+// farm state and turns clicks into engine actions.
 import * as Phaser from 'phaser';
 import HV from '../art/sprites';
 import { AtlasBuilder, GraphicsContext, record, replay, splitAt, type Frame, type Recording } from '../render/atlas';
 import { buildTerrain, type TerrainResult } from '../world/terrain';
 import { buildLayout, type ActorSpec, type Hotspot, type WorldLayout } from '../world/layout';
-import { PLOTS, TILE, WORLD_H, WORLD_W } from '../world/geometry';
+import { CROP_NAMES, PLOTS, TILE, WORLD_H, WORLD_W } from '../world/geometry';
+import { actionScope, cellsOf, collect, harvest, plant, refill, water } from '../sim/engine';
+import type { FarmState } from '../sim/state';
+import type { AnimalType } from '../sim/rules';
 import { seasonSwap } from '../env/palette';
 import type { Season } from '../env/environment';
 import { EnvironmentSystem } from '../systems/EnvironmentSystem';
@@ -23,11 +26,12 @@ import { useGame, type AnimalKind, type Selection } from '@/store/game';
 const ANIMALS: AnimalKind[] = ['cow', 'sheep', 'pig', 'chicken', 'duck'];
 const FOOT: Record<string, number> = { cow: 12, sheep: 11, pig: 10, chicken: 7, duck: 5, farmer: 14, tractor: 18 };
 const SPEED: Record<AnimalKind, number> = { cow: 5, sheep: 6, pig: 7, chicken: 11, duck: 6 };
+const PRODUCT_COLOR: Record<AnimalType, number> = { chicken: 0xf4ead8, cow: 0x6a98cf, sheep: 0xd9d0bd, pig: 0x7a4e2c };
 const ZONE_OF: Record<AnimalKind, string> = { cow: 'Cow Pasture', sheep: 'Sheep Pen', pig: 'Pig Enclosure', chicken: 'Chicken Coop', duck: 'Duck Pond' };
 const TERRAIN_NAME = ['Meadow', 'Water', 'Riverbank', 'Dirt road', 'Cobblestone', 'Tilled soil', 'Rice paddy'];
 const MINI = { w: 192, h: 120, pad: 16 };
 
-interface Animal { id: number; kind: AnimalKind; sprite: Phaser.GameObjects.Sprite; x: number; y: number; tx: number; ty: number; moving: boolean; wait: number; flip: boolean; rect: [number, number, number, number]; peck: number; graze: boolean; grazeT: number }
+interface Animal { id: string; kind: AnimalKind; sprite: Phaser.GameObjects.Sprite; x: number; y: number; tx: number; ty: number; moving: boolean; wait: number; flip: boolean; rect: [number, number, number, number]; peck: number; graze: boolean; grazeT: number }
 interface Walker { id: number; key: string; sprite: Phaser.GameObjects.Sprite; path: [number, number][]; i: number; x: number; y: number; speed: number; flip: boolean }
 interface Tractor { sprite: Phaser.GameObjects.Sprite; x: number; y: number; dir: 1 | -1; minX: number; maxX: number; exhaust: Phaser.GameObjects.Particles.ParticleEmitter }
 
@@ -62,6 +66,10 @@ export class WorldScene extends Phaser.Scene {
   private viewG!: Phaser.GameObjects.Graphics;
   private mini!: Phaser.Cameras.Scene2D.Camera;
   private hovered: Selection | null = null;
+  private tagged = new Map<string, Phaser.GameObjects.Image[]>();
+  private groundTags: (string | undefined)[] = [];
+  private pens: Partial<Record<AnimalKind, [number, number, number, number]>> = {};
+  private markG!: Phaser.GameObjects.Graphics;
   private drag: { x: number; y: number; sx: number; sy: number; moved: boolean } | null = null;
   private zooms: number[] = [2];
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
@@ -81,7 +89,10 @@ export class WorldScene extends Phaser.Scene {
     this.buildEnvironment();
     this.setupCamera();
     this.setupInput();
+    const farm0 = useGame.getState().farm;
+    if (farm0) this.onFarm(farm0);
     this.unsub = useGame.subscribe((s, p) => {
+      if (s.farm && s.farm !== p.farm) this.onFarm(s.farm);
       if (s.focus && s.focus !== p.focus) this.focusOn(s.focus.key);
       if (s.zoomStep && s.zoomStep !== p.zoomStep) this.zoomAt(this.scale.width / 2, this.scale.height / 2, s.zoomStep.dir);
       if (s.grid !== p.grid) this.gridG.setVisible(s.grid);
@@ -113,7 +124,7 @@ export class WorldScene extends Phaser.Scene {
   private buildStatic() {
     const { layout, terrain } = this;
     // flat decoration is baked into the ground bitmap; recordings are kept for seasonal repaints
-    for (const it of layout.items) if (it.ground) this.groundRecs.push({ rec: record(it.draw), nature: !!it.nature, variant: it.variant ?? 0 });
+    for (const it of layout.items) if (it.ground) { this.groundRecs.push({ rec: record(it.draw), nature: !!it.nature, variant: it.variant ?? 0 }); this.groundTags.push(it.tag); }
     this.paintGroundDecor();
     this.textures.addCanvas('ground', terrain.canvas);
     this.add.image(0, 0, 'ground').setOrigin(0).setDepth(-1000);
@@ -122,12 +133,12 @@ export class WorldScene extends Phaser.Scene {
     HV.onWindow = (x, y, w, h) => this.windows.push([x, y, w, h]);
     HV.onLamp = (x, y) => this.lamps.push([x, y]);
     const atlas = this.atlas = new AtlasBuilder();
-    const placed: { name: string; depth: number; sway?: number }[] = [];
+    const placed: { name: string; depth: number; sway?: number; tag?: string }[] = [];
     let n = 0;
-    const put = (rec: Recording, depth: number, nature: boolean, variant: number, sway?: number) => {
+    const put = (rec: Recording, depth: number, nature: boolean, variant: number, sway?: number, tag?: string) => {
       const name = `s${n++}`;
       if (!atlas.add(name, rec)) return;
-      placed.push({ name, depth, sway });
+      placed.push({ name, depth, sway, tag });
       if (nature) this.natureFrames.push({ name, rec, variant });
     };
     for (const it of [...layout.items.filter(i => !i.ground), ...layout.front]) {
@@ -137,7 +148,7 @@ export class WorldScene extends Phaser.Scene {
         const { top, bottom } = splitAt(rec, it.y - it.sway);
         put(bottom, it.y, !!it.nature, it.variant ?? 0);
         put(top, it.y + .5, !!it.nature, it.variant ?? 0, 1);
-      } else put(rec, it.y, !!it.nature, it.variant ?? 0);
+      } else put(rec, it.y, !!it.nature, it.variant ?? 0, undefined, it.tag);
     }
     HV.onWindow = undefined; HV.onLamp = undefined;
     this.buildActorFrames(atlas);
@@ -146,13 +157,81 @@ export class WorldScene extends Phaser.Scene {
       const { key, frame, f } = this.tex(p.name);
       const img = this.add.image(f.ox, f.oy, key, frame).setOrigin(0).setDepth(p.depth);
       if (p.sway !== undefined) this.swayers.push({ img, x: f.ox, ph: HV.hash(f.ox, f.oy, 3) * 6.28 });
+      if (p.tag) this.tagged.set(p.tag, [...(this.tagged.get(p.tag) ?? []), img]);
     }
   }
 
   /** Replays flat ground decoration onto the terrain bitmap in the current season's colours. */
   private paintGroundDecor() {
     const g = this.terrain.canvas.getContext('2d')!;
-    for (const d of this.groundRecs) replay(g, d.rec, 0, 0, d.nature ? seasonSwap(this.season, d.variant, this.dry) : undefined);
+    this.groundRecs.forEach((d, i) => {
+      const tag = this.groundTags[i];
+      if (tag?.startsWith('exp:') && PLOTS[Number(tag.slice(4))].kind !== 'expansion') return; // land already bought
+      replay(g, d.rec, 0, 0, d.nature ? seasonSwap(this.season, d.variant, this.dry) : undefined);
+    });
+  }
+
+  private repaintGround() {
+    buildTerrain(seasonSwap(this.season, 0, this.dry), this.terrain.canvas);
+    this.paintGroundDecor();
+    this.textures.get('ground').source[0].update();
+  }
+
+  // ------------------------------------------------------------------ farm state → world
+  private onFarm(farm: FarmState) {
+    this.syncLand(farm);
+    this.crops?.sync(farm);
+    this.syncAnimals(farm);
+  }
+
+  /** Bought expansion plots become soil: stakes and sign go, the ground is repainted. */
+  private syncLand(farm: FarmState) {
+    let changed = false;
+    farm.plots.forEach((p, i) => {
+      if (!p.unlocked || PLOTS[i].kind !== 'expansion') return;
+      PLOTS[i].kind = 'soil';
+      for (const img of this.tagged.get(`exp:${i}`) ?? []) img.destroy();
+      const hot = this.layout.hot.find(h => h.id === `plot${i}`);
+      if (hot) { hot.name = `Field ${i + 1}`; hot.play = 'Plant seeds, keep the soil watered and harvest when ripe.'; }
+      changed = true;
+    });
+    if (changed && this.terrain) this.repaintGround();
+  }
+
+  /** Spawns a sprite for every animal the player owns, in its pen. */
+  private syncAnimals(farm: FarmState) {
+    const have = new Set(this.animals.filter(a => a.kind !== 'duck').map(a => a.id));
+    for (const st of farm.animals) {
+      if (have.has(st.id)) continue;
+      const rect = this.pens[st.kind];
+      if (!rect) continue;
+      const [x0, y0, x1, y1] = rect, k = Number(st.id.slice(1));
+      const x = x0 + HV.hash(k, 3, 1) * (x1 - x0), y = y0 + HV.hash(k, 3, 2) * (y1 - y0);
+      this.animals.push({ id: st.id, kind: st.kind, sprite: this.sprite(`${st.kind}-r`, x, y), x, y, tx: x, ty: y, moving: false, wait: HV.hash(k, 3, 3) * 3, flip: HV.hash(k, 3, 4) < .5, rect, peck: HV.hash(k, 3, 5) * 6, graze: false, grazeT: HV.hash(k, 3, 6) * 3 });
+    }
+    const keep = new Set(farm.animals.map(a => a.id));
+    this.animals = this.animals.filter(a => { if (a.kind === 'duck' || keep.has(a.id)) return true; a.sprite.destroy(); return false; });
+  }
+
+  /** Product-ready bubbles and hungry markers above livestock. */
+  private drawMarkers(t: number, farm: FarmState | null) {
+    const g = this.markG; g.clear();
+    if (!farm) return;
+    const now = Date.now(), bob = Math.round(Math.sin(t * 3));
+    const byId = new Map(farm.animals.map(a => [a.id, a]));
+    for (const a of this.animals) {
+      const st = byId.get(a.id);
+      if (!st) continue;
+      const x = Math.round(a.sprite.x + a.sprite.width / 2), y = Math.round(a.sprite.y) - 6 + bob;
+      if (st.ready) {
+        g.fillStyle(0x3b2414, 1).fillRect(x - 4, y - 4, 9, 8).fillRect(x, y + 4, 1, 1);
+        g.fillStyle(0xfff4d6, 1).fillRect(x - 3, y - 3, 7, 6);
+        g.fillStyle(PRODUCT_COLOR[st.kind], 1).fillRect(x - 1, y - 2, 3, 4);
+      } else if (st.fedUntil < now) {
+        g.fillStyle(0x3b2414, 1).fillRect(x - 2, y - 4, 4, 8);
+        g.fillStyle(0xe8a33a, 1).fillRect(x - 1, y - 3, 2, 3).fillRect(x - 1, y + 1, 2, 2);
+      }
+    }
   }
 
   /** Repaints terrain and every nature sprite for a new season (or drought), masked by a quick fade. */
@@ -227,11 +306,14 @@ export class WorldScene extends Phaser.Scene {
         const exhaust = this.add.particles(0, 0, 'puff', { lifespan: 1600, speedX: { min: -6, max: 6 }, speedY: { min: -9, max: -5 }, scale: { start: .35, end: 1 }, alpha: { start: .5, end: 0 }, tint: 0x8a8a8a, frequency: 300 }).setDepth(40000);
         this.tractor = { sprite, x: a.x, y: a.y, dir: 1, minX: a.minX, maxX: a.maxX, exhaust: exhaust as unknown as Phaser.GameObjects.Particles.ParticleEmitter };
       } else {
+        // livestock comes from the farm state (see syncAnimals); only ducks are ambient
+        if (!this.pens[a.kind]) this.pens[a.kind] = a.rect;
+        if (a.kind !== 'duck') return;
         const [x0, y0, x1, y1] = a.rect;
         for (let k = 0; k < a.count; k++) {
           const x = x0 + HV.hash(k, a.seed, 1) * (x1 - x0), y = y0 + HV.hash(k, a.seed, 2) * (y1 - y0);
           const sprite = this.sprite(`${a.kind}-r`, x, y);
-          this.animals.push({ id: id++, kind: a.kind, sprite, x, y, tx: x, ty: y, moving: false, wait: HV.hash(k, a.seed, 3) * 3, flip: HV.hash(k, a.seed, 4) < .5, rect: a.rect, peck: HV.hash(k, a.seed, 5) * 6, graze: false, grazeT: HV.hash(k, a.seed, 6) * 3 });
+          this.animals.push({ id: `duck-${k}`, kind: a.kind, sprite, x, y, tx: x, ty: y, moving: false, wait: HV.hash(k, a.seed, 3) * 3, flip: HV.hash(k, a.seed, 4) < .5, rect: a.rect, peck: HV.hash(k, a.seed, 5) * 6, graze: false, grazeT: HV.hash(k, a.seed, 6) * 3 });
         }
       }
     });
@@ -324,7 +406,8 @@ export class WorldScene extends Phaser.Scene {
     this.water = new WaterSystem(this, this.terrain, () => this.animals.filter(a => a.kind === 'duck'));
     this.weather.onWaterHit = (x, y) => this.water.ripple(x, y, 3);
     this.wildlife = new WildlifeSystem(this, this.terrain);
-    this.crops = new CropSystem(this.layout.crops, {
+    this.markG = this.add.graphics().setDepth(60020);
+    this.crops = new CropSystem(this, {
       sprite: (prefix, x, y) => this.sprite(prefix, x, y),
       setFrame: (sp, name) => { const t = this.tex(name); sp.setTexture(t.key, t.frame); },
       offset: prefix => { const f = this.frames.get(`${prefix}-0`)!; return { ox: f.ox, oy: f.oy }; },
@@ -343,7 +426,7 @@ export class WorldScene extends Phaser.Scene {
     this.mini.centerOn(WORLD_W / 2, WORLD_H / 2).setBackgroundColor('#1d3a1f').setRoundPixels(false);
     this.viewG = this.add.graphics().setDepth(300000);
     cam.ignore(this.viewG);
-    this.mini.ignore([this.hoverG, this.gridG, ...this.fx.map(f => f.g), ...this.weather.objects, ...this.water.objects, ...this.wildlife.objects]);
+    this.mini.ignore([this.hoverG, this.gridG, this.markG, ...this.fx.map(f => f.g), ...this.weather.objects, ...this.water.objects, ...this.wildlife.objects, ...this.crops.objects]);
     this.positionMinimap();
     this.scale.on(Phaser.Scale.Events.RESIZE, (size: Phaser.Structs.Size) => {
       cam.setSize(size.width, size.height);
@@ -411,12 +494,30 @@ export class WorldScene extends Phaser.Scene {
       this.game.canvas.style.cursor = '';
       if (this.drag && !this.drag.moved) {
         const w = this.cameras.main.getWorldPoint(p.x, p.y);
-        useGame.getState().select(this.pick(w.x, w.y, true));
+        const sel = this.pick(w.x, w.y, true);
+        this.useTool(sel);
+        useGame.getState().select(sel);
       }
       this.drag = null;
     });
     this.input.on('gameout', () => this.setHover(null));
   }
+  /** Applies the active tool to what was clicked. */
+  private useTool(sel: Selection | null) {
+    const st = useGame.getState(), farm = st.farm;
+    if (!sel || !farm) return;
+    if (sel.type === 'cell') {
+      const ce = farm.plots[sel.plot].cells[sel.cell];
+      if (st.tool === 'plant' && !ce.crop) st.act((f, now) => plant(f, sel.plot, sel.cell, st.seed, now));
+      else if (st.tool === 'water') st.act((f, now) => water(f, sel.plot, sel.cell, now));
+      else if (st.tool === 'harvest' || (ce.crop && ce.growth >= 1)) st.act((f, now) => harvest(f, sel.plot, sel.cell, now));
+    } else if (sel.type === 'hotspot' && st.tool === 'water' && (sel.hot.id === 'well' || sel.hot.id === 'pond')) st.act(f => refill(f));
+    else if (sel.type === 'animal' && sel.kind !== 'duck') {
+      const a = farm.animals.find(x => x.id === sel.id);
+      if (a?.ready) st.act(f => collect(f, sel.id));
+    }
+  }
+
   /** HUD clicks also reach Phaser's window listeners; only react to presses that hit the canvas. */
   private onCanvas(p: Phaser.Input.Pointer) { return !p.event || p.event.target === this.game.canvas; }
   private inMini(p: Phaser.Input.Pointer) { const m = this.mini; return m.visible && p.x >= m.x && p.x < m.x + m.width && p.y >= m.y && p.y < m.y + m.height; }
@@ -437,13 +538,15 @@ export class WorldScene extends Phaser.Scene {
   private pick(wx: number, wy: number, allowTile: boolean): Selection | null {
     const hit = (s: Phaser.GameObjects.Sprite) => wx >= s.x && wx < s.x + s.width && wy >= s.y && wy < s.y + s.height;
     for (const a of this.animals) if (hit(a.sprite)) return { type: 'animal', kind: a.kind, id: a.id, zone: ZONE_OF[a.kind] };
+    const farm = useGame.getState().farm;
     for (const w of this.walkers) if (hit(w.sprite)) return { type: 'farmer', id: w.id };
     let best: Hotspot | null = null;
     for (const h of this.layout.hot)
       if (wx >= h.x && wx < h.x + h.w && wy >= h.y - 4 && wy < h.y + h.h && (!best || h.w * h.h < best.w * best.h)) best = h;
-    if (best?.kind === 'plot' && best.plot !== undefined && PLOTS[best.plot].kind !== 'expansion') {
-      const cell = this.layout.cells.find(c => c.plot === best!.plot && wx >= c.box[0] && wx < c.box[0] + c.box[2] && wy >= c.box[1] && wy < c.box[1] + c.box[3]);
-      if (cell) return { type: 'cell', hot: best, col: cell.col, row: cell.row, crop: best.crop ?? null, cropStage: best.cropStage ?? 0, tile: [Math.floor(wx / TILE), Math.floor(wy / TILE)] };
+    if (best?.kind === 'plot' && best.plot !== undefined && farm?.plots[best.plot].unlocked) {
+      const plot = best.plot;
+      const cell = cellsOf(plot).findIndex(c => wx >= c.box[0] && wx < c.box[0] + c.box[2] && wy >= c.box[1] && wy < c.box[1] + c.box[3]);
+      if (cell >= 0) return { type: 'cell', hot: best, plot, cell, tile: [Math.floor(wx / TILE), Math.floor(wy / TILE)] };
     }
     if (best) return { type: 'hotspot', hot: best };
     if (!allowTile) return null;
@@ -453,7 +556,7 @@ export class WorldScene extends Phaser.Scene {
 
   private boxOf(sel: Selection): [number, number, number, number] | null {
     if (sel.type === 'hotspot') return [sel.hot.x, sel.hot.y, sel.hot.w, sel.hot.h];
-    if (sel.type === 'cell') { const c = this.layout.cells.find(c => c.plot === sel.hot.plot && c.col === sel.col && c.row === sel.row); return c ? c.box : null; }
+    if (sel.type === 'cell') return cellsOf(sel.plot)[sel.cell]?.box ?? null;
     if (sel.type === 'animal') { const a = this.animals.find(a => a.id === sel.id); return a ? [a.sprite.x, a.sprite.y, a.sprite.width, a.sprite.height] : null; }
     if (sel.type === 'farmer') { const w = this.walkers.find(w => w.id === sel.id); return w ? [w.sprite.x, w.sprite.y, w.sprite.width, w.sprite.height] : null; }
     return [sel.tile[0] * TILE, sel.tile[1] * TILE, TILE, TILE];
@@ -482,7 +585,14 @@ export class WorldScene extends Phaser.Scene {
     if (this.hovered && this.hovered !== sel) {
       const b = this.boxOf(this.hovered);
       if (b) {
-        if (this.hovered.type === 'cell') { const h = this.hovered.hot; dash(h.x - 2, h.y - 2, h.w + 4, h.h + 4, 0xfff3b0, phase); g.fillStyle(0xfff3b0, .35).fillRect(b[0], b[1], b[2], b[3]); }
+        if (this.hovered.type === 'cell') {
+          const h = this.hovered.hot, { tool, farm } = useGame.getState();
+          dash(h.x - 2, h.y - 2, h.w + 4, h.h + 4, 0xfff3b0, phase);
+          // show everything the active tool would touch (a cell, a row or the whole field)
+          const cells = farm && (tool === 'plant' || tool === 'water' || tool === 'harvest') ? actionScope(farm, tool, this.hovered.plot, this.hovered.cell) : [this.hovered.cell];
+          const tint = tool === 'water' ? 0x86ccf2 : tool === 'harvest' ? 0xf7e08a : 0xfff3b0;
+          for (const c of this.crops.cellBoxes(this.hovered.plot, cells)) g.fillStyle(tint, .35).fillRect(c[0], c[1], c[2], c[3]);
+        }
         else dash(b[0] - 2, b[1] - 2, b[2] + 4, b[3] + 4, 0xfff3b0, phase);
       }
     }
@@ -513,7 +623,9 @@ export class WorldScene extends Phaser.Scene {
     // tree canopies sway: gentle in fair weather, hard in storms
     const amp = .55 + env.wind * .45, freq = .6 + env.wind * .5;
     for (const s of this.swayers) s.img.x = s.x + Math.round(Math.sin(t * freq + s.ph) * amp);
-    this.crops.update(t, dt, env);
+    const farm = useGame.getState().farm;
+    this.crops.update(t, dt, env, farm);
+    this.drawMarkers(t, farm);
     this.water.update(t, dt, env);
     this.weather.update(t, dt, env, cam.worldView);
     this.wildlife.update(t, dt, env);
@@ -531,7 +643,10 @@ export class WorldScene extends Phaser.Scene {
 function describe(sel: Selection): { label: string; sub: string } {
   switch (sel.type) {
     case 'hotspot': return { label: sel.hot.name, sub: sel.hot.zone };
-    case 'cell': return { label: sel.hot.name, sub: `Row ${sel.row + 1} · Col ${sel.col + 1}` };
+    case 'cell': {
+      const ce = useGame.getState().farm?.plots[sel.plot].cells[sel.cell];
+      return { label: ce?.crop ? CROP_NAMES[ce.crop] : 'Empty soil', sub: sel.hot.name };
+    }
     case 'animal': return { label: sel.kind[0].toUpperCase() + sel.kind.slice(1), sub: sel.zone };
     case 'farmer': return { label: 'Villager', sub: 'Neighbour farmer' };
     case 'tile': return { label: sel.terrain, sub: `Tile ${sel.tile[0]}, ${sel.tile[1]}` };

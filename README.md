@@ -6,7 +6,20 @@
 
 Harvestia is a browser-based pixel-art farming game with an agricultural economy referenced to real commodity markets and a $HRV token economy (Robinhood Chain first, BNB Chain later).
 
-## Current stage: 4 — Game UI
+## Current stage: 5 — Core gameplay
+
+The farm is playable with simulated **Farm Coins** (100 coins = $1 reference):
+
+- **Crops:** pick a seed and plant (1 spot, or the whole field with a seed planter), water a row from the can (refill at the well or pond), and harvest a row with the sickle or the whole field with the combine. Crops grow only while their soil is wet. Rain waters everything; the irrigation pump and irrigation channels keep their fields wet. Weather, season and the tractor change growth speed, and storage limits harvests.
+- **Livestock:** animals produce eggs, milk, wool and truffles only while fed. Feed lasts several cycles; unfed animals lose health. Collect products by clicking the animal (a bubble shows when ready) or from the Livestock window. Buy more within pen space.
+- **Machinery:** buy machines and level them up (can capacity, pump coverage, tractor growth bonus, harvester bonus, storage).
+- **Farm upgrades:** unlock the expansion plots, enrich a field with fertile soil (+1 per plant) or dig an irrigation channel, and add coops, shelters, barns and silos for more space.
+- **Progress:** XP and levels unlock crops (coffee at 5, cocoa at 6). Rotating tasks pay coins and XP. Selling in the inventory uses fixed store prices.
+- **Saving:** autosaves in the browser. Timers keep running while you are away and catch up on return; you can reset from the profile.
+
+The rules live in `src/game/sim/` as pure, deterministic functions (with unit tests), so the Stage 6 server can run the same code and become authoritative for timers and saves.
+
+### Stage 4 — Game UI
 
 Pixel-art game windows over the live world. Open them from the left menu, the toolbar, keyboard shortcuts or the inspector's action button:
 
@@ -64,7 +77,8 @@ The Stage 1 concept and art-direction sheet stay available at `/concept/index.ht
 | `src/store/game.ts` | Shared state between Phaser and the HUD |
 | `src/components/hud/` | React HUD |
 | `src/components/panels/`, `src/components/ui/` | Game windows and the pixel UI kit |
-| `src/game/data/` | Item catalog, economy rules, simulated market, demo player data |
+| `src/game/data/` | Item catalog, economy rules, simulated market, demo data |
+| `src/game/sim/` | Farm rules, state model, engine actions and tests |
 
 ## Architecture
 
@@ -80,6 +94,7 @@ The API currently exposes `GET /health` and `GET /v1/status`. Player accounts, p
 ```bash
 npm install && npm --prefix server install
 npm run dev        # frontend on http://localhost:5180
+npm test           # game rules tests
 npm run api:dev    # API on http://127.0.0.1:4000
 npm run api:test   # API tests
 ```
@@ -98,8 +113,8 @@ Development is stage-gated; each stage ships only after explicit approval.
 1. Visual concept ✓
 2. Playable world ✓
 3. Animation polish ✓
-4. Game UI ← current
-5. Core gameplay
+4. Game UI ✓
+5. Core gameplay ← current
 6. Backend
 7. Commodity economy
 8. Blockchain

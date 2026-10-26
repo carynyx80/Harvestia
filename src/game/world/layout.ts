@@ -2,7 +2,7 @@
 // zone labels and the ambient actors. Drawing closures call the sprite library
 // in world coordinates; the scene records them into a texture atlas.
 import HV from '../art/sprites';
-import { CROP_NAMES, PLOTS, POND, STAGE_NAMES, WORLD_H, WORLD_W, plotCells, riverC, riverDepth, riverHW, type CropCell, type CropType } from './geometry';
+import { PLOTS, POND, WORLD_H, WORLD_W, riverC, riverDepth, riverHW, type CropType } from './geometry';
 import { Ground, type TerrainResult } from './terrain';
 
 const { hash } = HV;
@@ -19,9 +19,7 @@ export interface Hotspot {
  * nature = recoloured by season (variant picks autumn leaf colour);
  * sway = canopy rows above y - sway move with the wind.
  */
-export interface StaticItem { y: number; draw: () => void; ground?: boolean; nature?: boolean; variant?: number; sway?: number }
-/** A crop sprite in a planting cell. demo cells loop through the growth animation. */
-export interface CropSpec { plot: number; col: number; row: number; x: number; y: number; crop: CropType; stage: number; demo: boolean }
+export interface StaticItem { y: number; draw: () => void; ground?: boolean; nature?: boolean; variant?: number; sway?: number; tag?: string }
 export interface Label { text: string; x: number; y: number }
 export interface Focus { id: string; x: number; y: number }
 
@@ -33,7 +31,7 @@ export type ActorSpec =
   | { kind: 'tractor'; x: number; y: number; minX: number; maxX: number };
 
 export interface WorldLayout {
-  items: StaticItem[]; front: StaticItem[]; hot: Hotspot[]; cells: CropCell[]; crops: CropSpec[]; labels: Label[]; actors: ActorSpec[];
+  items: StaticItem[]; front: StaticItem[]; hot: Hotspot[]; labels: Label[]; actors: ActorSpec[];
   /** named camera targets for the HUD navigation */
   focus: Record<string, Focus>;
   windmill: { x: number; y: number }; ticker: { x: number; y: number }; fountain: { x: number; y: number };
@@ -84,32 +82,24 @@ export function buildLayout(terrain: TerrainResult): WorldLayout {
   reserve(240, 166, 40, 14);
   spot({ id: 'seedcrates', kind: 'machine', x: 242, y: 166, w: 38, h: 14, name: 'Seed Storage', zone: 'Main Farm', play: 'Seed crates — your planting inventory.', stage: 4 });
 
-  const cells: CropCell[] = [], crops: CropSpec[] = [];
   for (const p of PLOTS) {
     if (p.kind === 'expansion') {
-      flat(() => {
+      // tagged so the stakes, sign and outline disappear when the land is bought
+      const tag = `exp:${p.index}`;
+      items.push({ y: -1, ground: true, tag, draw: () => {
         for (let k = 0; k < p.w; k += 6) { HV.R(p.x + k, p.y, 3, 1, '#f4e4bc'); HV.R(p.x + k, p.y + p.h - 1, 3, 1, '#f4e4bc'); }
         for (let k = 0; k < p.h; k += 6) { HV.R(p.x, p.y + k, 1, 3, '#f4e4bc'); HV.R(p.x + p.w - 1, p.y + k, 1, 3, '#f4e4bc'); }
-      });
-      for (const [sx, sy] of [[0, 0], [p.w - 2, 0], [0, p.h - 2], [p.w - 2, p.h - 2]]) add(p.y + sy + 2, () => HV.R(p.x + sx, p.y + sy - 3, 2, 5, '#8a5a32'));
-      add(p.y + 30, () => HV.sign(p.x + 30, p.y + 30, '#e8c35a'));
+      } });
+      for (const [sx, sy] of [[0, 0], [p.w - 2, 0], [0, p.h - 2], [p.w - 2, p.h - 2]]) items.push({ y: p.y + sy + 2, tag, draw: () => HV.R(p.x + sx, p.y + sy - 3, 2, 5, '#8a5a32') });
+      items.push({ y: p.y + 30, tag, draw: () => HV.sign(p.x + 30, p.y + 30, '#e8c35a') });
       reserve(p.x, p.y, p.w, p.h);
-      spot({ id: 'plot' + p.index, kind: 'plot', plot: p.index, crop: null, x: p.x, y: p.y, w: p.w, h: p.h, name: 'Expansion Plot', zone: 'Main Farm', play: 'Locked land. Unlocks with a land upgrade (priced in $HRV, max $10 reference).', stage: 5 });
+      spot({ id: 'plot' + p.index, kind: 'plot', plot: p.index, x: p.x, y: p.y, w: p.w, h: p.h, name: 'Expansion plot', zone: 'Main Farm', play: 'Locked land — buy it in the Land shop to farm it.', stage: 5 });
       continue;
     }
     reserve(p.x - 2, p.y - 2, p.w + 4, p.h + 4);
-    const name = p.kind === 'paddy' ? 'Rice Paddy' : p.crop ? `${CROP_NAMES[p.crop]} field` : 'Growth demo plot';
-    const play = p.kind === 'watered' ? 'Loops the plant → sprout → grow → harvest animation. Real planting arrives with core gameplay.'
-      : p.kind === 'paddy' ? 'Flooded field; rice needs the irrigation pump running.'
-      : `${STAGE_NAMES[p.stage]}. Plant → water → grow → harvest, with timers validated server-side.`;
-    spot({ id: 'plot' + p.index, kind: 'plot', plot: p.index, crop: p.crop, cropStage: p.stage, x: p.x, y: p.y, w: p.w, h: p.h, name, zone: 'Main Farm', play, stage: 5 });
-    for (const c of plotCells(p)) {
-      cells.push(c);
-      if (p.kind === 'watered') { crops.push({ plot: p.index, col: c.col, row: c.row, x: c.x, y: c.y, crop: 'wheat', stage: 0, demo: true }); continue; }
-      if (!p.crop) continue;
-      const stage = p.stage === 3 && hash(c.x, c.y, 2) < .08 ? 2 : p.stage;
-      crops.push({ plot: p.index, col: c.col, row: c.row, x: c.x, y: c.y, crop: p.crop, stage, demo: false });
-    }
+    const name = p.kind === 'paddy' ? 'Rice Paddy' : `Field ${p.index + 1}`;
+    const play = p.kind === 'paddy' ? 'Flooded field for rice; the irrigation pump keeps it wet.' : 'Plant seeds, keep the soil watered and harvest when ripe.';
+    spot({ id: 'plot' + p.index, kind: 'plot', plot: p.index, x: p.x, y: p.y, w: p.w, h: p.h, name, zone: 'Main Farm', play, stage: 5 });
   }
   add(250, () => HV.scarecrow(126, 250));
   add(520, () => HV.pump(286, 506)); reserve(282, 500, 26, 22);
@@ -222,7 +212,7 @@ export function buildLayout(terrain: TerrainResult): WorldLayout {
     { kind: 'tractor', x: 352, y: 264, minX: 350, maxX: 398 },
   ];
   return {
-    items, front, hot, cells, crops, labels, actors, focus,
+    items, front, hot, labels, actors, focus,
     windmill: { x: 430, y: 141 }, ticker: { x: 726, y: 115 }, fountain: { x: 851, y: 248 },
     flags: [{ x: 752, y: 68, col: '#3f8a8c', col2: '#f2c94c' }, { x: 893, y: 314, col: '#4e8a3c', col2: '#f2c94c' }, { x: 756, y: 466, col: '#c4553b', col2: '#f2c94c' }],
     sprinklers: [[378, 435], [450, 379]], bunting: [704, 822, 462],

@@ -1,14 +1,44 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { ITEM, ITEMS, SHOP_TABS, type Item, type ShopCategory } from '@/game/data/items';
+import { ITEM, ITEMS, SHOP_TABS, type Item } from '@/game/data/items';
 import { MAX_ITEM_USD, PURCHASE_SPLIT, QUOTE_SECONDS, fmtHrv, fmtUsd, toHrv } from '@/game/data/economy';
 import { useGame } from '@/store/game';
+import { animalCapacity, buy, coinPrice } from '@/game/sim/engine';
+import { MACHINE_RULES, UNAVAILABLE, UNIQUE_BUILDINGS, type AnimalType } from '@/game/sim/rules';
+import type { FarmState } from '@/game/sim/state';
 import { Card, ItemIcon, SimTag, StageButton, Window } from '@/components/ui/kit';
 
 const TABS = [...SHOP_TABS.map(t => ({ key: t.key as string, label: t.label })), { key: 'listings', label: 'Player listings' }];
 
+/** What the player already has of an item, or why it can't be bought. */
+function status(farm: FarmState, item: Item): { note?: string; blocked?: string } {
+  if (UNAVAILABLE[item.id]) return { blocked: UNAVAILABLE[item.id] };
+  if (item.category === 'machinery') {
+    if (item.id === 'mach-storage') return { note: `Owned: ${farm.machines[item.id] ?? 0}` };
+    const lvl = farm.machines[item.id];
+    if (lvl) return { blocked: `Owned · level ${lvl}/${MACHINE_RULES[item.id]?.maxLevel ?? 1} — upgrade it in Equipment` };
+  }
+  if (item.category === 'buildings') {
+    const n = farm.buildings[item.id] ?? 0;
+    if (UNIQUE_BUILDINGS.includes(item.id) && n) return { blocked: 'Already on your farm' };
+    if (n) return { note: `You have ${n}` };
+  }
+  if (item.category === 'livestock') {
+    const kind = item.id.replace('animal-', '') as AnimalType;
+    return { note: `Pen space: ${farm.animals.filter(a => a.kind === kind).length} / ${animalCapacity(farm, kind)}` };
+  }
+  if (item.category === 'land' && (item.id === 'land-plot' || item.id === 'land-large')) {
+    const locked = farm.plots.filter(p => !p.unlocked).length;
+    return locked ? { note: `${locked} plot${locked > 1 ? 's' : ''} for sale` } : { blocked: 'All available land is unlocked' };
+  }
+  const have = farm.inventory[item.id];
+  return have ? { note: `In storage: ${have}` } : {};
+}
+
 /** Purchase confirmation: quote with expiry, the burn/treasury split and the final total. */
 function Confirm({ item, qty, onBack }: { item: Item; qty: number; onBack: () => void }) {
+  const act = useGame(s => s.act), farm = useGame(s => s.farm);
+  const coins = coinPrice(item.id) * qty;
   const [left, setLeft] = useState(QUOTE_SECONDS);
   const [n, setN] = useState(0);
   useEffect(() => { setLeft(QUOTE_SECONDS); const id = setInterval(() => setLeft(l => Math.max(0, l - 1)), 1000); return () => clearInterval(id); }, [n]);
@@ -17,6 +47,11 @@ function Confirm({ item, qty, onBack }: { item: Item; qty: number; onBack: () =>
     <Card className="flex flex-col gap-2">
       <b className="text-lg">Confirm purchase</b>
       <div className="flex items-center gap-3"><ItemIcon item={item} size={40} /><div><b>{qty} × {item.name}</b><div className="text-xs text-muted">{fmtUsd(item.usd)} reference each</div></div></div>
+      <div className="border-2 border-leaf bg-[#e6f2d0] px-2 py-1.5 text-sm">
+        <div className="flex justify-between"><span>Pay now (Farm Coins · simulated)</span><b>{coins.toLocaleString('en-US')}</b></div>
+        <div className="flex justify-between text-xs text-muted"><span>Balance after</span><span>{((farm?.coins ?? 0) - coins).toLocaleString('en-US')}</span></div>
+      </div>
+      <b className="text-xs tracking-wide text-muted uppercase">With $HRV (Stage 8)</b>
       <dl className="m-0 grid grid-cols-[1fr_auto] gap-y-1 text-sm">
         <dt className="text-muted">Total</dt><dd className="m-0 text-right font-bold">{fmtHrv(total)}</dd>
         <dt className="text-muted">Permanently burned ({PURCHASE_SPLIT.burn * 100}%)</dt><dd className="m-0 text-right">{fmtHrv(total * PURCHASE_SPLIT.burn)}</dd>
@@ -28,13 +63,13 @@ function Confirm({ item, qty, onBack }: { item: Item; qty: number; onBack: () =>
         <button className="text-xs underline" onClick={() => setN(x => x + 1)}>Refresh quote</button>
       </div>
       <p className="m-0 text-xs leading-snug text-muted">Prices are quoted by the server from verified $HRV pricing with liquidity checks; the price shown here is a demo rate. Burns only count once the transaction is confirmed on-chain.</p>
-      <div className="flex gap-1.5"><button className="btn-wood" onClick={onBack}>Back</button><StageButton stage={8} gold>Confirm</StageButton></div>
+      <div className="flex gap-1.5"><button className="btn-wood" onClick={onBack}>Back</button><button className="btn-gold" disabled={(farm?.coins ?? 0) < coins} onClick={() => { if (act((f, now) => buy(f, item.id, qty, now))) onBack(); }}>Buy for {coins.toLocaleString('en-US')} coins</button></div>
     </Card>
   );
 }
 
 export function ShopPanel({ tab = 'seeds' }: { tab?: string }) {
-  const close = useGame(s => s.closePanel), open = useGame(s => s.openPanel);
+  const close = useGame(s => s.closePanel), open = useGame(s => s.openPanel), farm = useGame(s => s.farm);
   const items = ITEMS.filter(i => i.category === tab);
   const [pick, setPick] = useState<string | null>(null);
   const [qty, setQty] = useState(1);
@@ -45,7 +80,7 @@ export function ShopPanel({ tab = 'seeds' }: { tab?: string }) {
 
   return (
     <Window title="Marketplace" icon="stall" tabs={TABS} tab={tab} onTab={k => { setPick(null); open('shop', k); }} onClose={close}
-      footer={<>Every item is priced in $HRV with a USD reference; no single item costs more than {fmtUsd(MAX_ITEM_USD)}. Demo rate shown — real quotes arrive with the token (Stage 8). Simulated Farm Coins are used for play in Stage 5.</>}>
+      footer={<>Play uses simulated Farm Coins (100 coins = $1 reference). Every item also shows its $HRV price at a demo rate; no single item costs more than {fmtUsd(MAX_ITEM_USD)}. Real $HRV quotes arrive with the token (Stage 8).</>}>
       {tab === 'listings' ? <Listings /> : (
         <div className="grid gap-3 md:grid-cols-[1fr_280px]">
           <div>
@@ -56,8 +91,8 @@ export function ShopPanel({ tab = 'seeds' }: { tab?: string }) {
                   className={`flex flex-col items-center gap-1 border-2 p-2 text-center ${item?.id === i.id ? 'border-gold bg-[#fff0b8] shadow-[0_0_0_2px_#f2c94c]' : 'border-wood bg-[#e9d29c] hover:bg-parch-l'}`}>
                   <span className="grid h-14 place-items-center"><ItemIcon item={i} size={i.thumb ? 56 : 40} /></span>
                   <b className="text-sm leading-tight">{i.name}</b>
-                  <span className="text-sm font-bold text-gold-d">{fmtHrv(toHrv(i.usd))}</span>
-                  <span className="text-[11px] text-muted">≈ {fmtUsd(i.usd)}</span>
+                  <span className="text-sm font-bold text-up">{coinPrice(i.id).toLocaleString('en-US')} coins</span>
+                  <span className="text-[11px] text-muted">{fmtHrv(toHrv(i.usd))} · ≈ {fmtUsd(i.usd)}</span>
                 </button>
               ))}
             </div>
@@ -68,18 +103,18 @@ export function ShopPanel({ tab = 'seeds' }: { tab?: string }) {
               <b className="text-lg leading-tight">{item.name}</b>
               <p className="m-0 text-sm leading-snug">{item.desc}</p>
               {item.effect && <div className="border-l-4 border-leaf bg-[#e6f2d0] px-2 py-1 text-sm"><b>Effect:</b> {item.effect}</div>}
-              <div className="flex items-center justify-between text-sm"><span className="text-muted">Price each</span><b>{fmtHrv(toHrv(item.usd))} <span className="font-normal text-muted">≈ {fmtUsd(item.usd)}</span></b></div>
+              <div className="flex items-center justify-between text-sm"><span className="text-muted">Price each</span><b>{coinPrice(item.id).toLocaleString('en-US')} coins <span className="font-normal text-muted">· {fmtHrv(toHrv(item.usd))}</span></b></div>
+              {farm && (() => { const st = status(farm, item); return st.blocked ? <div className="border-2 border-parch-d bg-parch px-2 py-1 text-sm text-muted">{st.blocked}</div> : st.note ? <div className="text-sm text-muted">{st.note}</div> : null; })()}
               {(tab === 'seeds' || tab === 'feed' || tab === 'livestock') && (
                 <div className="flex items-center gap-2 text-sm">
                   <span className="text-muted">Quantity</span>
                   <button className="btn-wood !px-2 !py-0" onClick={() => setQty(q => Math.max(1, q - 1))} aria-label="Fewer">−</button>
                   <b className="w-8 text-center">{qty}</b>
                   <button className="btn-wood !px-2 !py-0" onClick={() => setQty(q => Math.min(99, q + 1))} aria-label="More">+</button>
-                  <b className="ml-auto">{fmtHrv(toHrv(item.usd) * qty)}</b>
+                  <b className="ml-auto">{(coinPrice(item.id) * qty).toLocaleString('en-US')} coins</b>
                 </div>
               )}
-              <button className="btn-gold mt-auto" onClick={() => setConfirm(true)}>Review purchase</button>
-              {ITEM[item.id].category === 'buildings' && <span className="text-xs text-muted">After buying, place it on free land with the Build tool.</span>}
+              <button className="btn-gold mt-auto" disabled={!!(farm && status(farm, item).blocked)} onClick={() => setConfirm(true)}>Review purchase</button>
             </Card>
           ))}
         </div>

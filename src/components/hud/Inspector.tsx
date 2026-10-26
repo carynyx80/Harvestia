@@ -1,37 +1,20 @@
 'use client';
+// Details and actions for whatever is selected in the world, from live farm state.
+import type { ReactNode } from 'react';
 import { CROP_NAMES, STAGE_NAMES, TILE } from '@/game/world/geometry';
+import { ITEM } from '@/game/data/items';
+import { ANIMAL_RULES, CROP_RULES } from '@/game/sim/rules';
+import { cellsOf, collect, feed, harvest, improveField, isPumped, isWet, plant, refill, secondsToReady, stageOf, water } from '@/game/sim/engine';
+import type { FarmState } from '@/game/sim/state';
 import { useGame, type PanelId, type Selection } from '@/store/game';
+import { Bar } from '@/components/ui/kit';
 
-const PRODUCT = { cow: 'Milk', sheep: 'Wool', pig: 'Truffles', chicken: 'Eggs', duck: 'Feathers' } as const;
+const PRODUCT_NAME = { cow: 'Milk', sheep: 'Wool', pig: 'Truffles', chicken: 'Eggs', duck: 'Feathers' } as const;
 const BUILDABLE = new Set(['Meadow']);
 
-function body(sel: Selection, tool: string): { zone: string; title: string; rows: [string, string][]; text: string; stage: number } {
-  switch (sel.type) {
-    case 'hotspot':
-      return { zone: sel.hot.zone, title: sel.hot.name, rows: [], text: sel.hot.play, stage: sel.hot.stage };
-    case 'cell': {
-      const crop = sel.crop ? CROP_NAMES[sel.crop] : 'Empty';
-      return {
-        zone: sel.hot.zone, title: sel.hot.name,
-        rows: [['Crop', crop], ['Growth', sel.crop ? STAGE_NAMES[sel.cropStage] : 'Ready to plant'], ['Cell', `Row ${sel.row + 1}, column ${sel.col + 1}`], ['World tile', `${sel.tile[0]}, ${sel.tile[1]}`]],
-        text: tool === 'plant' || tool === 'water' || tool === 'harvest'
-          ? `${tool[0].toUpperCase() + tool.slice(1)} tool selected — the action itself arrives with core gameplay.`
-          : 'Each planting cell becomes a server-tracked crop slot.',
-        stage: 5,
-      };
-    }
-    case 'animal':
-      return { zone: 'Livestock Ranch', title: sel.kind[0].toUpperCase() + sel.kind.slice(1), rows: [['Home', sel.zone], ['Produces', PRODUCT[sel.kind]], ['Health', 'Good (demo)']], text: 'Feeding, health and production timers arrive with core gameplay.', stage: 5 };
-    case 'farmer':
-      return { zone: 'Village', title: 'Neighbour farmer', rows: [], text: 'Other players will walk the roads; visiting their farms arrives with multiplayer.', stage: 10 };
-    case 'tile':
-      return { zone: 'Terrain', title: sel.terrain, rows: [['Tile', `${sel.tile[0]}, ${sel.tile[1]}`], ['Grid', `${TILE} × ${TILE}`], ['Buildable', BUILDABLE.has(sel.terrain) ? 'Yes' : 'No']], text: 'Press G to show the terrain grid used for building placement.', stage: 5 };
-  }
-}
-
-// Which window a selected world object opens.
-const ACTIONS: Record<string, [string, PanelId, string?]> = {
-  house: ['Farmer profile', 'profile'], seedcrates: ['Seeds', 'inventory', 'seeds'], well: ['Equipment', 'equipment'],
+// Which window a selected building opens.
+const LINKS: Record<string, [string, PanelId, string?]> = {
+  house: ['Farmer profile', 'profile'], seedcrates: ['Seeds', 'inventory', 'seeds'],
   trading: ['Open shop', 'shop', 'seeds'], market: ['Player listings', 'shop', 'listings'], exchange: ['Open exchange', 'exchange'],
   vault: ['Wallet & vault', 'wallet'], board: ['Farm tasks', 'farm'], storage: ['Inventory', 'inventory'],
   shed: ['Equipment', 'equipment'], harvester: ['Equipment', 'equipment'], pump: ['Equipment', 'equipment'],
@@ -42,37 +25,103 @@ const ACTIONS: Record<string, [string, PanelId, string?]> = {
   hq: ['Cooperatives', 'coop'], cmk1: ['Cooperatives', 'coop'], cmk2: ['Cooperatives', 'coop'], sharedmill: ['Cooperatives', 'coop'],
   tower: ['Leaderboard', 'competitions'], arena: ['Competitions', 'competitions'],
 };
-function actionFor(sel: Selection): [string, PanelId, string?] | null {
-  if (sel.type === 'animal') return sel.kind === 'duck' ? null : ['Livestock', 'livestock', sel.kind];
-  if (sel.type === 'cell') return ['Seeds', 'inventory', 'seeds'];
-  if (sel.type === 'hotspot') {
-    if (sel.hot.kind === 'plot') return sel.hot.crop ? ['Sell at exchange', 'exchange', sel.hot.crop] : ['Buy land', 'shop', 'land'];
-    return ACTIONS[sel.hot.id] ?? null;
-  }
-  return null;
+
+export const fmtSecs = (s: number) => !isFinite(s) ? 'paused — soil is dry' : s <= 0 ? 'ready' : s < 60 ? `${Math.ceil(s)}s` : `${Math.floor(s / 60)}m ${Math.ceil(s % 60)}s`;
+
+function Row({ k, children }: { k: string; children: ReactNode }) {
+  return <><dt className="text-muted">{k}</dt><dd className="m-0 font-semibold">{children}</dd></>;
+}
+
+function FieldImprovements({ farm, plot }: { farm: FarmState; plot: number }) {
+  const act = useGame(s => s.act);
+  const p = farm.plots[plot];
+  const items = (['land-fertile', 'land-irrigation'] as const).filter(id => (farm.inventory[id] ?? 0) > 0 && !(id === 'land-fertile' ? p.fertile : p.irrigated));
+  if (!items.length) return null;
+  return <>{items.map(id => <button key={id} className="btn-wood !px-2 !py-0.5 text-xs" onClick={() => act(f => improveField(f, id, plot))}>Use {ITEM[id].name.toLowerCase()}</button>)}</>;
 }
 
 export function Inspector() {
-  const sel = useGame(s => s.selected), tool = useGame(s => s.tool), select = useGame(s => s.select), open = useGame(s => s.openPanel);
+  const sel = useGame(s => s.selected), select = useGame(s => s.select), open = useGame(s => s.openPanel);
+  const farm = useGame(s => s.farm), act = useGame(s => s.act), seed = useGame(s => s.seed), env = useGame(s => s.env);
   if (!sel) return null;
-  const b = body(sel, tool);
+  const c = { weather: env.weather, season: env.season }, now = Date.now();
+  let zone = '', title = '', text = '', stage = 0;
+  let rows: ReactNode = null, bar: ReactNode = null, actions: ReactNode = null;
+
+  if (sel.type === 'cell' && farm) {
+    const ce = farm.plots[sel.plot].cells[sel.cell], wet = isWet(farm, sel.plot, sel.cell, now, c);
+    const p = farm.plots[sel.plot];
+    zone = sel.hot.name; title = ce.crop ? CROP_NAMES[ce.crop] : 'Empty soil'; stage = 5;
+    const why = c.weather === 'rainy' || c.weather === 'stormy' ? 'rain' : p.irrigated ? 'irrigated' : isPumped(farm, sel.plot) ? 'pump' : wet ? 'watered' : '';
+    rows = (
+      <dl className="my-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+        {ce.crop && <Row k="Stage">{STAGE_NAMES[stageOf(ce.growth)]}</Row>}
+        {ce.crop && <Row k="Ready in">{fmtSecs(secondsToReady(farm, sel.plot, sel.cell, now, c))}</Row>}
+        <Row k="Soil">{wet ? `Wet (${why})` : 'Dry — needs water'}{p.fertile ? ' · fertile' : ''}</Row>
+        {ce.crop && <Row k="Yield">{CROP_RULES[ce.crop].yield + (p.fertile ? 1 : 0)} per plant</Row>}
+      </dl>
+    );
+    if (ce.crop) bar = <Bar value={ce.growth} className="mb-2" color={ce.growth >= 1 ? '#e8b93c' : '#7cc24c'} />;
+    text = ce.crop ? (ce.growth >= 1 ? 'Ripe! Harvest it with the harvest tool or the button below.' : 'Growing. Keep the soil wet so it keeps growing.') : 'Ready for planting. Pick a seed with the Plant tool.';
+    actions = <>
+      {!ce.crop && <button className="btn-gold !px-2 !py-0.5 text-sm" onClick={() => act((f, n) => plant(f, sel.plot, sel.cell, seed, n))}>Plant {ITEM[seed]?.name.replace(' seeds', '').toLowerCase()}</button>}
+      {ce.crop && ce.growth >= 1 && <button className="btn-gold !px-2 !py-0.5 text-sm" onClick={() => act((f, n) => harvest(f, sel.plot, sel.cell, n))}>Harvest</button>}
+      {(!ce.crop || ce.growth < 1) && <button className="btn-wood !px-2 !py-0.5 text-sm" onClick={() => act((f, n) => water(f, sel.plot, sel.cell, n))}>Water row ({farm.can})</button>}
+      <FieldImprovements farm={farm} plot={sel.plot} />
+    </>;
+  } else if (sel.type === 'hotspot' && sel.hot.kind === 'plot' && farm && sel.hot.plot !== undefined) {
+    const plot = sel.hot.plot, p = farm.plots[plot];
+    zone = 'Main Farm'; title = sel.hot.name; stage = 5;
+    if (!p.unlocked) {
+      text = 'Locked land. Buy an expansion plot in the Land shop to farm it.';
+      actions = <button className="btn-gold !px-2 !py-0.5 text-sm" onClick={() => open('shop', 'land')}>Buy land</button>;
+    } else {
+      const planted = p.cells.filter(x => x.crop).length, ready = p.cells.filter(x => x.crop && x.growth >= 1).length;
+      rows = <dl className="my-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5"><Row k="Planted">{planted} / {cellsOf(plot).length}</Row><Row k="Ripe">{ready}</Row><Row k="Extras">{[p.fertile && 'fertile', p.irrigated && 'irrigated', isPumped(farm, plot) && 'pump-watered'].filter(Boolean).join(', ') || 'none'}</Row></dl>;
+      text = 'Click a planting spot with a tool to plant, water or harvest.';
+      actions = <><button className="btn-wood !px-2 !py-0.5 text-sm" onClick={() => open('exchange', p.cells.find(x => x.crop)?.crop ?? 'wheat')}>Market prices</button><FieldImprovements farm={farm} plot={plot} /></>;
+    }
+  } else if (sel.type === 'animal' && sel.kind !== 'duck' && farm) {
+    const a = farm.animals.find(x => x.id === sel.id);
+    if (a) {
+      const rule = ANIMAL_RULES[a.kind], fed = a.fedUntil > now;
+      zone = sel.zone; title = `${a.name} the ${a.kind}`; stage = 5;
+      rows = <dl className="my-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5"><Row k="Health">{Math.round(a.health * 100)}%</Row><Row k="Fed">{fed ? `for ${fmtSecs((a.fedUntil - now) / 1000)}` : 'Hungry'}</Row><Row k={PRODUCT_NAME[a.kind]}>{a.ready ? 'Ready to collect' : fed ? `in ${fmtSecs(rule.cycle - a.progress)}` : 'paused until fed'}</Row></dl>;
+      bar = <Bar value={a.progress / rule.cycle} className="mb-2" color="#e8b93c" />;
+      text = fed ? 'Producing while fed.' : `Feed it ${ITEM[rule.feed].name.toLowerCase()} to restart production (you have ${farm.inventory[rule.feed] ?? 0}).`;
+      actions = <>
+        {a.ready && <button className="btn-gold !px-2 !py-0.5 text-sm" onClick={() => act(f => collect(f, a.id))}>Collect {PRODUCT_NAME[a.kind].toLowerCase()}</button>}
+        <button className="btn-wood !px-2 !py-0.5 text-sm" onClick={() => act((f, n) => feed(f, a.id, n))}>Feed</button>
+        <button className="btn-wood !px-2 !py-0.5 text-sm" onClick={() => open('livestock', a.kind)}>Herd</button>
+      </>;
+    }
+  } else if (sel.type === 'hotspot') {
+    zone = sel.hot.zone; title = sel.hot.name; text = sel.hot.play; stage = sel.hot.stage;
+    if ((sel.hot.id === 'well' || sel.hot.id === 'pond') && farm) actions = <button className="btn-gold !px-2 !py-0.5 text-sm" onClick={() => act(f => refill(f))}>Refill watering can ({farm.can})</button>;
+    const link = LINKS[sel.hot.id];
+    if (link) actions = <>{actions}<button className="btn-gold !px-2 !py-0.5 text-sm" onClick={() => open(link[1], link[2])}>{link[0]}</button></>;
+  } else if (sel.type === 'animal') {
+    zone = sel.zone; title = 'Duck'; text = 'Wild ducks enjoy the pond. They are not part of your herd.'; stage = 3;
+  } else if (sel.type === 'farmer') {
+    zone = 'Village'; title = 'Neighbour farmer'; text = 'Other players will walk the roads; visiting their farms arrives with multiplayer.'; stage = 10;
+  } else if (sel.type === 'tile') {
+    zone = 'Terrain'; title = sel.terrain; stage = 5;
+    rows = <dl className="my-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5"><Row k="Tile">{sel.tile[0]}, {sel.tile[1]}</Row><Row k="Grid">{TILE} × {TILE}</Row><Row k="Buildable">{BUILDABLE.has(sel.terrain) ? 'Yes' : 'No'}</Row></dl>;
+    text = 'Press G to show the terrain grid.';
+  }
+  if (!title) return null;
+
   return (
     <section className="panel pointer-events-auto absolute right-2.5 bottom-[118px] w-[min(290px,calc(100vw-20px))] px-3.5 py-3 text-sm lg:bottom-auto lg:top-[440px]" aria-live="polite">
       <button className="absolute top-1.5 right-2 text-lg font-bold" aria-label="Close" onClick={() => select(null)}>×</button>
-      <div className="text-xs tracking-wide text-muted uppercase">{b.zone}</div>
-      <h3 className="m-0 text-[19px] font-bold">{b.title}</h3>
-      {b.rows.length > 0 && (
-        <dl className="my-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-          {b.rows.map(([k, v]) => <div key={k} className="contents"><dt className="text-muted">{k}</dt><dd className="m-0 font-semibold">{v}</dd></div>)}
-        </dl>
-      )}
-      {sel.type === 'cell' && sel.crop && (
-        <div className="mb-2 h-3 border-2 border-wood-d bg-[#6b4a2e]"><i className="xp-fill block h-full" style={{ width: `${(sel.cropStage / 3) * 100}%` }} /></div>
-      )}
-      <p className="my-2 leading-snug">{b.text}</p>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="inline-block border-2 border-[#2a5f61] bg-teal px-1.5 py-0.5 text-xs text-white">Playable from Stage {b.stage}</span>
-        {(() => { const a = actionFor(sel); return a && <button className="btn-gold ml-auto !px-2 !py-0.5 text-sm" onClick={() => open(a[1], a[2])}>{a[0]}</button>; })()}
+      <div className="text-xs tracking-wide text-muted uppercase">{zone}</div>
+      <h3 className="m-0 text-[19px] font-bold">{title}</h3>
+      {rows}
+      {bar}
+      <p className="my-1.5 leading-snug">{text}</p>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {actions}
+        {stage > 5 && <span className="inline-block border-2 border-[#2a5f61] bg-teal px-1.5 py-0.5 text-xs text-white">Playable from Stage {stage}</span>}
       </div>
     </section>
   );

@@ -1,16 +1,17 @@
 // Shared state between the Phaser world and the React HUD.
 import { create } from 'zustand';
-import type { CropType } from '@/game/world/geometry';
 import type { Hotspot } from '@/game/world/layout';
 import type { EnvSnapshot, Season, Weather } from '@/game/env/environment';
+import type { FarmState } from '@/game/sim/state';
+import type { Conditions, FarmEvent, Result } from '@/game/sim/engine';
 
 export type Tool = 'plant' | 'water' | 'harvest' | 'build' | 'upgrade' | 'inventory';
 export type AnimalKind = 'cow' | 'sheep' | 'pig' | 'chicken' | 'duck';
 
 export type Selection =
   | { type: 'hotspot'; hot: Hotspot }
-  | { type: 'cell'; hot: Hotspot; col: number; row: number; crop: CropType | null; cropStage: number; tile: [number, number] }
-  | { type: 'animal'; kind: AnimalKind; id: number; zone: string }
+  | { type: 'cell'; hot: Hotspot; plot: number; cell: number; tile: [number, number] }
+  | { type: 'animal'; kind: AnimalKind; id: string; zone: string }
   | { type: 'farmer'; id: number }
   | { type: 'tile'; tile: [number, number]; terrain: string };
 
@@ -19,6 +20,9 @@ export interface EnvCommand { n: number; hour?: number; season?: Season; weather
 
 export type PanelId = 'inventory' | 'shop' | 'profile' | 'farm' | 'equipment' | 'livestock' | 'exchange' | 'wallet' | 'coop' | 'competitions';
 export interface OpenPanel { id: PanelId; tab?: string }
+
+export interface Toast { id: number; text: string; tone: 'good' | 'bad' | 'info' | 'level' }
+export interface Popup { id: number; x: number; y: number; text: string; tone: 'good' | 'gold' | 'blue' }
 
 export interface Hover { label: string; sub: string; sx: number; sy: number }
 export interface CameraView { x: number; y: number; zoom: number; w: number; h: number }
@@ -38,6 +42,15 @@ interface GameState {
   panel: OpenPanel | null;
   /** seed chosen in the Plant tool's picker (an item id) */
   seed: string;
+  /** the player's farm; null until loaded on the client */
+  farm: FarmState | null;
+  toasts: Toast[];
+  popups: Popup[];
+  setFarm(f: FarmState): void;
+  /** Applies an engine action to the farm; returns false (and shows why) when it was refused. */
+  act(fn: (s: FarmState, now: number, c: Conditions) => Result): boolean;
+  conditions(): Conditions;
+  toast(text: string, tone?: Toast['tone']): void;
   setReady(): void;
   openPanel(id: PanelId, tab?: string): void;
   togglePanel(id: PanelId, tab?: string): void;
@@ -54,6 +67,21 @@ interface GameState {
   requestZoom(dir: 1 | -1): void;
 }
 
+let nextId = 1;
+function pushEvents(events: FarmEvent[]) {
+  if (!events.length) return;
+  const st = useGame.getState();
+  const toasts = [...st.toasts], popups = [...st.popups];
+  for (const e of events) {
+    const id = nextId++;
+    if (e.kind === 'toast') toasts.push({ id, text: e.text, tone: e.tone });
+    else if (e.kind === 'levelup') toasts.push({ id, text: `Level up! You reached level ${e.level}`, tone: 'level' });
+    else popups.push({ id, x: e.x, y: e.y, text: e.text, tone: e.tone });
+    setTimeout(() => useGame.setState(s => ({ toasts: s.toasts.filter(t => t.id !== id), popups: s.popups.filter(p => p.id !== id) })), e.kind === 'pop' ? 1600 : 3200);
+  }
+  useGame.setState({ toasts: toasts.slice(-4), popups: popups.slice(-12) });
+}
+
 export const useGame = create<GameState>((set, get) => ({
   ready: false,
   tool: 'plant',
@@ -67,6 +95,20 @@ export const useGame = create<GameState>((set, get) => ({
   envCommand: null,
   panel: null,
   seed: 'seed-wheat',
+  farm: null,
+  toasts: [],
+  popups: [],
+  setFarm: farm => set({ farm }),
+  conditions: () => ({ weather: get().env.weather, season: get().env.season }),
+  act: fn => {
+    const farm = get().farm;
+    if (!farm) return false;
+    const r = fn(farm, Date.now(), get().conditions());
+    if (r.state !== farm) set({ farm: r.state });
+    pushEvents(r.events);
+    return !r.error;
+  },
+  toast: (text, tone = 'info') => pushEvents([{ kind: 'toast', text, tone: tone === 'level' ? 'good' : tone }]),
   setReady: () => set({ ready: true }),
   openPanel: (id, tab) => set({ panel: { id, tab } }),
   togglePanel: (id, tab) => set({ panel: get().panel?.id === id && (!tab || get().panel?.tab === tab) ? null : { id, tab } }),

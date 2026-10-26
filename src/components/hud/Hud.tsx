@@ -4,6 +4,8 @@ import { Inspector } from './Inspector';
 import { LeftNav } from './LeftNav';
 import { ToolContext } from './ToolContext';
 import { PanelHost } from '@/components/panels/PanelHost';
+import { FarmRuntime } from '@/components/FarmRuntime';
+import { Toasts, WorldPopups } from './Feedback';
 import { Toolbar } from './Toolbar';
 import { TopBar } from './TopBar';
 import { HoverTip, LoadingScreen, MinimapFrame, ViewControls, ZoneLabels } from './WorldOverlays';
@@ -13,7 +15,9 @@ export function Hud() {
   return (
     <div className="pointer-events-none absolute inset-0 select-none">
       <div className="vignette absolute inset-0" />
+      <FarmRuntime />
       <ZoneLabels />
+      <WorldPopups />
       <TopBar />
       <LeftNav />
       <CommodityBoard />
@@ -23,6 +27,7 @@ export function Hud() {
       <ToolContext />
       <Toolbar />
       <PanelHost />
+      <Toasts />
       <HoverTip />
       <LoadingScreen />
     </div>

@@ -43,7 +43,7 @@ ROWS.forEach((py, ri) => COLS.forEach((px, ci) => {
   const cell = PLAN[ri][ci];
   const base = { index: PLOTS.length, x: px, y: py, w: 60, h: 44 };
   if (cell[0] === 'expansion') PLOTS.push({ ...base, kind: 'expansion', crop: null, stage: 0 });
-  else if (cell[0] === 'watered') PLOTS.push({ ...base, kind: 'watered', crop: null, stage: 0 });
+  else if (cell[0] === 'watered') PLOTS.push({ ...base, kind: 'soil', crop: null, stage: 0 });
   else PLOTS.push({ ...base, kind: 'soil', crop: cell[0], stage: cell[1] as number });
 }));
 PLOTS.push({ index: PLOTS.length, x: 176, y: 490, w: 104, h: 40, kind: 'paddy', crop: 'rice', stage: 3 });

@@ -2,6 +2,7 @@
 import HV from '@/game/art/sprites';
 import { useGame } from '@/store/game';
 import { WEATHER_LABEL, formatHour, isSnowing } from '@/game/env/environment';
+import { xpForLevel } from '@/game/sim/rules';
 import { Icon, Sprite, type IconName } from './Icon';
 
 const drawAvatar = () => HV.farmer(2, 1, 0, false, { shirt: '#c4553b', pants: '#3f6fa8' }, 'front');
@@ -33,7 +34,8 @@ function WeatherPill() {
 }
 
 export function TopBar() {
-  const open = useGame(s => s.openPanel);
+  const open = useGame(s => s.openPanel), farm = useGame(s => s.farm);
+  const level = farm?.level ?? 1, xp = farm?.xp ?? 0, next = xpForLevel(level);
   return (
     <header className="pointer-events-none absolute inset-x-2.5 top-2.5 flex items-start gap-2.5">
       <div className="logo-glow pointer-events-auto -mt-1 w-[124px] shrink-0 sm:w-[168px]">
@@ -45,17 +47,17 @@ export function TopBar() {
           <Sprite w={13} h={16} scale={3} draw={drawAvatar} className="mt-1.5" />
         </div>
         <div>
-          <div className="text-[17px] font-bold whitespace-nowrap">Sunny Acres <span className="ml-1 border-2 border-[#2c6e2c] bg-leaf px-1.5 text-[13px] text-white">Lv 7</span></div>
+          <div className="text-[17px] font-bold whitespace-nowrap">Sunny Acres <span className="ml-1 border-2 border-[#2c6e2c] bg-leaf px-1.5 text-[13px] text-white">Lv {level}</span></div>
           <div className="relative mt-1 h-4 w-[168px] border-2 border-wood-d bg-[#6b4a2e]">
-            <i className="xp-fill absolute inset-y-0 left-0" style={{ width: '62%' }} />
-            <b className="relative block text-center text-[11px] leading-3 font-semibold text-white [text-shadow:0_1px_0_#2a1a10]">1,240 / 2,000 XP</b>
+            <i className="xp-fill absolute inset-y-0 left-0" style={{ width: `${Math.min(100, xp / next * 100)}%` }} />
+            <b className="relative block text-center text-[11px] leading-3 font-semibold text-white [text-shadow:0_1px_0_#2a1a10]">{xp.toLocaleString('en-US')} / {next.toLocaleString('en-US')} XP</b>
           </div>
         </div>
       </button>
       <div className="pointer-events-auto mt-1 ml-auto flex flex-wrap items-center justify-end gap-2">
         <Pill icon="coin" label="Wallet" value="— HRV" title="Read from the $HRV ERC-20 contract once wallets connect (Stage 8)" onClick={() => open('wallet')} />
         <Pill icon="vault" label="Game Vault" value="— HRV" title="Deposited $HRV available for in-game spending (Stage 8)" onClick={() => open('wallet')} />
-        <div className="hidden md:block"><Pill icon="seed" label="Farm Coins · sim" value="1,250" tone="green" title="Simulated currency until on-chain integration" /></div>
+        <div className="hidden md:block"><Pill icon="seed" label="Farm Coins · sim" value={(farm?.coins ?? 0).toLocaleString('en-US')} tone="green" title="Simulated currency for play until $HRV integration (Stage 8)" onClick={() => open('inventory')} /></div>
         <div className="hidden md:block"><WeatherPill /></div>
         <button className="btn-gold" onClick={() => open('wallet')} title="Wallet details (V) — connecting arrives in Stage 8">Connect Wallet</button>
         <button className="btn-wood grid size-10 place-items-center !p-0" title="Settings"><Icon name="gear" /></button>
