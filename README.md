@@ -4,6 +4,8 @@
 
 **Grow your farm. Trade the markets. Build your empire.**
 
+Follow along on X: [@Harvestiaa](https://x.com/Harvestiaa) · Play: [harvestia.xyz](https://www.harvestia.xyz)
+
 Harvestia is a browser-based pixel-art farming game with an agricultural economy referenced to real commodity markets and a $HRV token economy (Robinhood Chain first, BNB Chain later).
 
 ## Current stage: 7 — Commodity economy

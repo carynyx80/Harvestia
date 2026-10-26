@@ -67,6 +67,7 @@ export function TopBar() {
         {address && linked === address
           ? <button className="btn-wood flex items-center gap-1.5" onClick={() => open('wallet')} title="Signed in with this wallet (V)"><i className="inline-block size-2 border border-wood-d bg-[#4ce06a]" />{shortAddress(address)}</button>
           : <button className="btn-gold" onClick={() => open('wallet')} title="Connect and sign in with your wallet (V)">{address ? 'Sign in' : 'Connect Wallet'}</button>}
+        <a className="btn-wood grid size-10 place-items-center !p-0 text-xl font-bold leading-none no-underline" href="https://x.com/Harvestiaa" target="_blank" rel="noreferrer" title="Follow Harvestia on X (@Harvestiaa)" aria-label="Harvestia on X">𝕏</a>
         <button className="btn-wood grid size-10 place-items-center !p-0" title="Settings"><Icon name="gear" /></button>
       </div>
     </header>

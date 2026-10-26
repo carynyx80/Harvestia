@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   description: 'Grow your farm. Trade the markets. Build your empire. A pixel-art Web3 farming economy.',
   icons: { icon: '/assets/favicon-32.png', apple: '/assets/apple-touch-icon.png' },
   openGraph: { title: 'Harvestia', description: 'Grow your farm. Trade the markets. Build your empire.', images: ['/assets/og-image.png'] },
-  twitter: { card: 'summary_large_image', images: ['/assets/og-image.png'] },
+  twitter: { card: 'summary_large_image', site: '@Harvestiaa', creator: '@Harvestiaa', images: ['/assets/og-image.png'] },
 };
 export const viewport: Viewport = { themeColor: '#0b0e13', width: 'device-width', initialScale: 1 };
 
