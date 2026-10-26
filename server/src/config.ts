@@ -19,7 +19,7 @@ export const config = {
   /** Reference price provider: 'imf' (IMF Primary Commodity Prices via FRED) or 'off'. */
   marketProvider: process.env.MARKET_PROVIDER ?? 'imf',
   /** Exact origins allowed to call the API (the Vercel frontend and local dev). */
-  corsOrigins: list(process.env.CORS_ORIGINS ?? 'https://harvestia-one.vercel.app,http://localhost:5180'),
+  corsOrigins: list(process.env.CORS_ORIGINS ?? 'https://harvestia-one.vercel.app,https://harvestia.xyz,https://www.harvestia.xyz,http://localhost:5180'),
   /** Vercel preview deployments of this project, e.g. harvestia-abc123-carynyx1.vercel.app */
   corsPreviewPattern: /^https:\/\/harvestia-[a-z0-9-]+-carynyx1\.vercel\.app$/,
 };
