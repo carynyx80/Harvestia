@@ -1,8 +1,8 @@
-// When gameplay opens to the public (Thursday, October 29, 2026, 4:00 PM UTC). Before this the site shows a countdown and the
+// When gameplay opens to the public (Friday, October 30, 2026, 4:00 PM UTC). Before this the site shows a countdown and the
 // server refuses farm actions. Override with LAUNCH_OPENS_AT / NEXT_PUBLIC_LAUNCH_OPENS_AT.
-export const LAUNCH_OPENS_AT = Date.parse('2026-10-29T16:00:00Z');
-/** $HRV launches on Robinhood Chain (Thursday, October 29, 2026, 3:00 PM UTC). */
-export const TOKEN_LAUNCH_AT = Date.parse('2026-10-29T15:00:00Z');
+export const LAUNCH_OPENS_AT = Date.parse('2026-10-30T16:00:00Z');
+/** $HRV launches on Robinhood Chain (Friday, October 30, 2026, 3:00 PM UTC). */
+export const TOKEN_LAUNCH_AT = Date.parse('2026-10-30T15:00:00Z');
 
 /**
  * Temporary windows when the doors are open early; the gate returns on its own when one ends.
